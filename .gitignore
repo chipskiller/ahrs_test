@@ -1,0 +1,30 @@
+# Keil MDK - 用户特定配置文件
+*.uvguix*
+*.uvopt
+*.uvoptx
+
+# Keil MDK - 编译输出
+output/
+*.o
+*.d
+*.crf
+*.lst
+*.map
+
+# 构建产物
+*.hex
+*.axf
+*.bin
+*.elf
+
+# IDE / 编辑器
+.vscode/
+.cache/
+.idea/
+
+# 编译命令数据库
+compile_commands.json
+
+# 系统文件
+Thumbs.db
+.DS_Store
