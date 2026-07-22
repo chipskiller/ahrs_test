@@ -1,0 +1,35 @@
+{
+    "configurations": [
+        {
+            "name": "GD32F330",
+            "includePath": [
+                "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template",
+                "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS",
+                "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS/GD/GD32F3x0/Include",
+                "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/GD32F3x0_standard_peripheral/Include",
+                "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Utilities"
+            ],
+            "defines": [
+                "GD32F330",
+                "USE_STDPERIPH_DRIVER",
+                "__IO=volatile"
+            ],
+            "compilerPath": "",
+            "cStandard": "c99",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "gcc-arm",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template",
+                    "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS",
+                    "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS/GD/GD32F3x0/Include",
+                    "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/GD32F3x0_standard_peripheral/Include",
+                    "${workspaceFolder}/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Utilities"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+        }
+    ],
+    "version": 4
+}

@@ -1,0 +1,80 @@
+[
+    {
+        "directory": "c:\\Users\\EDY\\Desktop\\项目\\ahrs_test",
+        "file": "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template/main.c",
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-mcpu=cortex-m4",
+            "-mthumb",
+            "-std=c99",
+            "-DGD32F330",
+            "-DUSE_STDPERIPH_DRIVER",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS/GD/GD32F3x0/Include",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/GD32F3x0_standard_peripheral/Include",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Utilities",
+            "-o",
+            "/dev/null",
+            "-Wall"
+        ]
+    },
+    {
+        "directory": "c:\\Users\\EDY\\Desktop\\项目\\ahrs_test",
+        "file": "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template/systick.c",
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-mcpu=cortex-m4",
+            "-mthumb",
+            "-std=c99",
+            "-DGD32F330",
+            "-DUSE_STDPERIPH_DRIVER",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS/GD/GD32F3x0/Include",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/GD32F3x0_standard_peripheral/Include",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Utilities",
+            "-o",
+            "/dev/null",
+            "-Wall"
+        ]
+    },
+    {
+        "directory": "c:\\Users\\EDY\\Desktop\\项目\\ahrs_test",
+        "file": "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template/gd32f3x0_it.c",
+        "arguments": [
+            "arm-none-eabi-gcc",
+            "-c",
+            "-mcpu=cortex-m4",
+            "-mthumb",
+            "-std=c99",
+            "-DGD32F330",
+            "-DUSE_STDPERIPH_DRIVER",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Template",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/CMSIS/GD/GD32F3x0/Include",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Firmware/GD32F3x0_standard_peripheral/Include",
+            "-I",
+            "GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/GD32F3x0_Firmware_Library_V2.6.0/Utilities",
+            "-o",
+            "/dev/null",
+            "-Wall"
+        ]
+    }
+]

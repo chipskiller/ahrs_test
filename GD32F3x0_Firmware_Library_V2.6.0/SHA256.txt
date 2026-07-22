@@ -1,0 +1,1 @@
+GD32F3x0_Firmware_Library_V2.6.0's hash: d3407f1531e881491356ba43a78290dbbfebb6c8b528d5c11bf9e02e94d622d8 

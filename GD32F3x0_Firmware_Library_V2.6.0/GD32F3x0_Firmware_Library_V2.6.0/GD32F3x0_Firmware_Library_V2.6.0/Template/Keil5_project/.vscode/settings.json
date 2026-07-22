@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "*.{a80,z80,asm,inc,s}": "asm-collection",
+        "*.{list,lis}": "asm-list-file",
+        "gd32f3x0.h": "c",
+        "main.h": "c",
+        "gd32f350r_eval.h": "c"
+    }
+}
