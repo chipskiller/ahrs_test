@@ -30,47 +30,42 @@
 
 /************************ 全局数据结构体 ************************/
 // IMU原始传感器数据
-typedef struct
-{
-    float ax;   // X轴加速度 g
-    float ay;   // Y轴加速度 g
-    float az;   // Z轴加速度 g
-    float gx;   // X轴角速度 °/s
-    float gy;   // Y轴角速度 °/s
-    float gz;   // Z轴角速度 °/s
-    float temp; // 芯片温度 ℃
+typedef struct {
+  float ax;   // X轴加速度 g
+  float ay;   // Y轴加速度 g
+  float az;   // Z轴加速度 g
+  float gx;   // X轴角速度 °/s
+  float gy;   // Y轴角速度 °/s
+  float gz;   // Z轴角速度 °/s
+  float temp; // 芯片温度 ℃
 } icm_raw_data_t;
 
 // 磁力计原始数据
-typedef struct
-{
-    float mx;
-    float my;
-    float mz;
-    float mag_norm; // 地磁模长，用于判断干扰
+typedef struct {
+  float mx;
+  float my;
+  float mz;
+  float mag_norm; // 地磁模长，用于判断干扰
 } mag_raw_data_t;
 
 // 姿态结构体：实时角度 + 安装标定基准零点
-typedef struct
-{
-    float w, x, y, z;
+typedef struct {
+  float w, x, y, z;
 } quaternion_t;
 
-typedef struct
-{
-    float pitch;      // 实时俯仰角 X轴
-    float roll;       // 实时横滚角 Y轴
-    float yaw_now;    // 实时旋转角 Z轴(绕灯杆)
-    float pitch_base; // 安装基准俯仰零点
-    float roll_base;  // 安装基准横滚零点
-    float yaw_base;   // 安装基准旋转零点
+typedef struct {
+  float pitch;      // 实时俯仰角 X轴
+  float roll;       // 实时横滚角 Y轴
+  float yaw_now;    // 实时旋转角 Z轴(绕灯杆)
+  float pitch_base; // 安装基准俯仰零点
+  float roll_base;  // 安装基准横滚零点
+  float yaw_base;   // 安装基准旋转零点
 } attitude_info_t;
 
 // 陀螺温度补偿零偏参数
-typedef struct
-{
-    float gz_bias;  // Z轴陀螺静态零偏
-    float temp_ref; // 标定时基准温度
+typedef struct {
+  float gz_bias;  // Z轴陀螺静态零偏
+  float temp_ref; // 标定时基准温度
 } gyro_bias_t;
 
 // 全局变量
@@ -110,135 +105,128 @@ uint8_t soft_i2c_read_byte(uint8_t ack);
  * @param reg:寄存器地址
  * @retval 读取到的寄存器数值
  */
-uint8_t i2c_reg_read(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg)
-{
-    soft_i2c_start();
-    soft_i2c_send_byte((dev_addr << 1) | 0);
-    soft_i2c_send_byte(reg);
-    soft_i2c_start();
-    soft_i2c_send_byte((dev_addr << 1) | 1);
-    uint8_t data = soft_i2c_read_byte(0);
-    soft_i2c_stop();
-    return data;
+uint8_t i2c_reg_read(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg) {
+  soft_i2c_start();
+  soft_i2c_send_byte((dev_addr << 1) | 0);
+  soft_i2c_send_byte(reg);
+  soft_i2c_start();
+  soft_i2c_send_byte((dev_addr << 1) | 1);
+  uint8_t data = soft_i2c_read_byte(0);
+  soft_i2c_stop();
+  return data;
 }
 
 /**
  * @brief I2C单寄存器写入
  */
-void i2c_reg_write(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg, uint8_t data)
-{
-    soft_i2c_start();
-    soft_i2c_send_byte((dev_addr << 1) | 0);
-    soft_i2c_send_byte(reg);
-    soft_i2c_send_byte(data);
-    soft_i2c_stop();
+void i2c_reg_write(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg,
+                   uint8_t data) {
+  soft_i2c_start();
+  soft_i2c_send_byte((dev_addr << 1) | 0);
+  soft_i2c_send_byte(reg);
+  soft_i2c_send_byte(data);
+  soft_i2c_stop();
 }
 
 /**
  * @brief I2C连续批量读取多字节
  */
-void i2c_reg_read_multi(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg, uint8_t *buf, uint16_t len)
-{
-    soft_i2c_start();
-    soft_i2c_send_byte((dev_addr << 1) | 0);
-    soft_i2c_send_byte(reg);
-    soft_i2c_start();
-    soft_i2c_send_byte((dev_addr << 1) | 1);
+void i2c_reg_read_multi(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg,
+                        uint8_t *buf, uint16_t len) {
+  soft_i2c_start();
+  soft_i2c_send_byte((dev_addr << 1) | 0);
+  soft_i2c_send_byte(reg);
+  soft_i2c_start();
+  soft_i2c_send_byte((dev_addr << 1) | 1);
 
-    for (uint16_t i = 0; i < len; i++)
-    {
-        buf[i] = soft_i2c_read_byte((i < len - 1) ? 1 : 0);
-    }
+  for (uint16_t i = 0; i < len; i++) {
+    buf[i] = soft_i2c_read_byte((i < len - 1) ? 1 : 0);
+  }
 
-    soft_i2c_stop();
+  soft_i2c_stop();
 }
 
 /************************ ICM42670 驱动函数 ************************/
 /**
  * @brief ICM42670芯片初始化
  */
-void icm42670_init(void)
-{
-    uint8_t who_am_i;
+void icm42670_init(void) {
+  uint8_t who_am_i;
 
-    who_am_i = i2c_reg_read(I2C_IMU, ICM42670_ADDR, 0x75);
+  who_am_i = i2c_reg_read(I2C_IMU, ICM42670_ADDR, 0x75);
 
-    if (who_am_i != 0x67)
-    {
-        return;
-    }
+  if (who_am_i != 0x67) {
+    return;
+  }
 
-    i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x00);
-    delay_ms(100);
+  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x00);
+  delay_ms(100);
 
-    i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x0F);
-    delay_ms(30);
+  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x0F);
+  delay_ms(30);
 
-    i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x21, 0x68);
-    i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x20, 0x68);
+  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x21, 0x68);
+  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x20, 0x68);
 }
 
 /**
  * @brief 读取IMU全部原始数据并转换物理量
  */
-void icm42670_get_raw_data(void)
-{
-    uint8_t buf[12] = {0};
-    i2c_reg_read_multi(I2C_IMU, ICM42670_ADDR, 0x0B, buf, 12);
+void icm42670_get_raw_data(void) {
+  uint8_t buf[12] = {0};
+  i2c_reg_read_multi(I2C_IMU, ICM42670_ADDR, 0x0B, buf, 12);
 
-    int16_t ax_raw = (buf[0] << 8) | buf[1];
-    int16_t ay_raw = (buf[2] << 8) | buf[3];
-    int16_t az_raw = (buf[4] << 8) | buf[5];
-    icm_raw.ax = ax_raw / 16384.0f;
-    icm_raw.ay = ay_raw / 16384.0f;
-    icm_raw.az = az_raw / 16384.0f;
+  int16_t ax_raw = (buf[0] << 8) | buf[1];
+  int16_t ay_raw = (buf[2] << 8) | buf[3];
+  int16_t az_raw = (buf[4] << 8) | buf[5];
+  icm_raw.ax = ax_raw / 16384.0f;
+  icm_raw.ay = ay_raw / 16384.0f;
+  icm_raw.az = az_raw / 16384.0f;
 
-    int16_t gx_raw = (buf[6] << 8) | buf[7];
-    int16_t gy_raw = (buf[8] << 8) | buf[9];
-    int16_t gz_raw = (buf[10] << 8) | buf[11];
-    icm_raw.gx = gx_raw / 131.072f;
-    icm_raw.gy = gy_raw / 131.072f;
-    icm_raw.gz = gz_raw / 131.072f;
+  int16_t gx_raw = (buf[6] << 8) | buf[7];
+  int16_t gy_raw = (buf[8] << 8) | buf[9];
+  int16_t gz_raw = (buf[10] << 8) | buf[11];
+  icm_raw.gx = gx_raw / 131.072f;
+  icm_raw.gy = gy_raw / 131.072f;
+  icm_raw.gz = gz_raw / 131.072f;
 
-    uint8_t temp_buf[2] = {0};
-    i2c_reg_read_multi(I2C_IMU, ICM42670_ADDR, 0x09, temp_buf, 2);
-    int16_t temp_raw = (temp_buf[0] << 8) | temp_buf[1];
-    icm_raw.temp = temp_raw / 132.48f + 25.0f;
+  uint8_t temp_buf[2] = {0};
+  i2c_reg_read_multi(I2C_IMU, ICM42670_ADDR, 0x09, temp_buf, 2);
+  int16_t temp_raw = (temp_buf[0] << 8) | temp_buf[1];
+  icm_raw.temp = temp_raw / 132.48f + 25.0f;
 }
 
 /************************ QMC5883P 磁力计驱动 ************************/
-void qmc5883p_init(void)
-{
-    i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x09, 0x1D); // 连续采样、8倍增益、100Hz
-    i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0A, 0x00);
+void qmc5883p_init(void) {
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x09, 0x1D); // 连续采样、8倍增益、100Hz
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0A, 0x00);
 }
 
 /**
  * @brief 读取磁力计原始数据，计算地磁模长
  */
-void qmc5883p_get_raw_data(void)
-{
-    uint8_t buf[6] = {0};
-    i2c_reg_read_multi(I2C_MAG, QMC5883P_ADDR, 0x00, buf, 6);
-    int16_t mx_raw = (buf[1] << 8) | buf[0];
-    int16_t my_raw = (buf[3] << 8) | buf[2];
-    int16_t mz_raw = (buf[5] << 8) | buf[4];
+void qmc5883p_get_raw_data(void) {
+  uint8_t buf[6] = {0};
+  i2c_reg_read_multi(I2C_MAG, QMC5883P_ADDR, 0x00, buf, 6);
+  int16_t mx_raw = (buf[1] << 8) | buf[0];
+  int16_t my_raw = (buf[3] << 8) | buf[2];
+  int16_t mz_raw = (buf[5] << 8) | buf[4];
 
-    mag_raw.mx = mx_raw;
-    mag_raw.my = my_raw;
-    mag_raw.mz = mz_raw;
-    mag_raw.mag_norm = sqrtf(mag_raw.mx * mag_raw.mx + mag_raw.my * mag_raw.my + mag_raw.mz * mag_raw.mz);
+  mag_raw.mx = mx_raw;
+  mag_raw.my = my_raw;
+  mag_raw.mz = mz_raw;
+  mag_raw.mag_norm = sqrtf(mag_raw.mx * mag_raw.mx + mag_raw.my * mag_raw.my +
+                           mag_raw.mz * mag_raw.mz);
 }
 
 /**
  * @brief 判断地磁是否被大车金属干扰
  */
-void mag_disturb_detect(void)
-{
-    static float last_norm = 0;
-    float delta = fabsf(mag_raw.mag_norm - last_norm);
-    last_norm = mag_raw.mag_norm;
-    mag_disturb_flag = (delta > MAG_DISTURB_THRESH) ? 1 : 0;
+void mag_disturb_detect(void) {
+  static float last_norm = 0;
+  float delta = fabsf(mag_raw.mag_norm - last_norm);
+  last_norm = mag_raw.mag_norm;
+  mag_disturb_flag = (delta > MAG_DISTURB_THRESH) ? 1 : 0;
 }
 
 /************************ 陀螺静态零偏自动校准 ************************/
@@ -248,34 +236,32 @@ void mag_disturb_detect(void)
  */
 
 /************************ 四元数辅助函数 ************************/
-static void quat_normalize(void)
-{
-    float norm = sqrtf(quat.w * quat.w + quat.x * quat.x + quat.y * quat.y + quat.z * quat.z);
-    if (norm > 0.0001f)
-    {
-        quat.w /= norm;
-        quat.x /= norm;
-        quat.y /= norm;
-        quat.z /= norm;
-    }
+static void quat_normalize(void) {
+  float norm = sqrtf(quat.w * quat.w + quat.x * quat.x + quat.y * quat.y +
+                     quat.z * quat.z);
+  if (norm > 0.0001f) {
+    quat.w /= norm;
+    quat.x /= norm;
+    quat.y /= norm;
+    quat.z /= norm;
+  }
 }
 
-static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg)
-{
-    float p = pitch_deg * 0.0174533f * 0.5f;
-    float r = roll_deg * 0.0174533f * 0.5f;
-    float y = yaw_deg * 0.0174533f * 0.5f;
-    
-    float cp = cosf(p), sp = sinf(p);
-    float cr = cosf(r), sr = sinf(r);
-    float cy = cosf(y), sy = sinf(y);
-    
-    quat.w = cp * cr * cy + sp * sr * sy;
-    quat.x = sp * cr * cy - cp * sr * sy;
-    quat.y = cp * sr * cy + sp * cr * sy;
-    quat.z = cp * cr * sy - sp * sr * cy;
-    
-    quat_normalize();
+static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg) {
+  float p = pitch_deg * 0.0174533f * 0.5f;
+  float r = roll_deg * 0.0174533f * 0.5f;
+  float y = yaw_deg * 0.0174533f * 0.5f;
+
+  float cp = cosf(p), sp = sinf(p);
+  float cr = cosf(r), sr = sinf(r);
+  float cy = cosf(y), sy = sinf(y);
+
+  quat.w = cp * cr * cy + sp * sr * sy;
+  quat.x = sp * cr * cy - cp * sr * sy;
+  quat.y = cp * sr * cy + sp * cr * sy;
+  quat.z = cp * cr * sy - sp * sr * cy;
+
+  quat_normalize();
 }
 
 /************************ 姿态解算算法 ************************/
@@ -284,353 +270,335 @@ static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg)
  * 内部使用四元数进行姿态更新，避免万向节锁
  * 输出仍然是欧拉角（pitch, roll, yaw_now）
  */
-void attitude_calc_6axis(float *ax, float *ay, float *az, float *gx, float *gy, float *gz, float *temp)
-{
-    static uint8_t first_run = 1;
-    static float gx_bias = 0.0f, gy_bias = 0.0f;
-    static float gx_sum = 0.0f, gy_sum = 0.0f, gz_sum = 0.0f;
-    static uint16_t init_cnt = 0;
-    static float ix = 0.0f, iy = 0.0f, iz = 0.0f;
+void attitude_calc_6axis(float *ax, float *ay, float *az, float *gx, float *gy,
+                         float *gz, float *temp) {
+  static uint8_t first_run = 1;
+  static float gx_bias = 0.0f, gy_bias = 0.0f;
+  static float gx_sum = 0.0f, gy_sum = 0.0f, gz_sum = 0.0f;
+  static uint16_t init_cnt = 0;
+  static float ix = 0.0f, iy = 0.0f, iz = 0.0f;
 
-    if (first_run)
-    {
-        gx_sum += *gx;
-        gy_sum += *gy;
-        gz_sum += *gz;
-        init_cnt++;
+  if (first_run) {
+    gx_sum += *gx;
+    gy_sum += *gy;
+    gz_sum += *gz;
+    init_cnt++;
 
-        if (init_cnt >= 200)
-        {
-            gx_bias = gx_sum / 200.0f;
-            gy_bias = gy_sum / 200.0f;
-            gyro_bias.gz_bias = gz_sum / 200.0f;
-            gyro_bias.temp_ref = *temp;
+    if (init_cnt >= 200) {
+      gx_bias = gx_sum / 200.0f;
+      gy_bias = gy_sum / 200.0f;
+      gyro_bias.gz_bias = gz_sum / 200.0f;
+      gyro_bias.temp_ref = *temp;
 
-            float accel_pitch = atan2f(-*ax, sqrtf(*ay * *ay + *az * *az)) * 57.3f;
-            float accel_roll = atan2f(*ay, *az) * 57.3f;
-            euler_to_quat(accel_pitch, accel_roll, 0.0f);
+      float accel_pitch = atan2f(-*ax, sqrtf(*ay * *ay + *az * *az)) * 57.3f;
+      float accel_roll = atan2f(*ay, *az) * 57.3f;
+      euler_to_quat(accel_pitch, accel_roll, 0.0f);
 
-            first_run = 0;
-        }
-        else
-        {
-            float accel_pitch = atan2f(-*ax, sqrtf(*ay * *ay + *az * *az)) * 57.3f;
-            float accel_roll = atan2f(*ay, *az) * 57.3f;
-            att.pitch = accel_pitch;
-            att.roll = accel_roll;
-            att.yaw_now = 0.0f;
-            return;
-        }
+      first_run = 0;
+    } else {
+      float accel_pitch = atan2f(-*ax, sqrtf(*ay * *ay + *az * *az)) * 57.3f;
+      float accel_roll = atan2f(*ay, *az) * 57.3f;
+      att.pitch = accel_pitch;
+      att.roll = accel_roll;
+      att.yaw_now = 0.0f;
+      return;
     }
+  }
 
-    float gx_comp = *gx - gx_bias;
-    float gy_comp = *gy - gy_bias;
-    float gz_comp = *gz - gyro_bias.gz_bias;
+  float gx_comp = *gx - gx_bias;
+  float gy_comp = *gy - gy_bias;
+  float gz_comp = *gz - gyro_bias.gz_bias;
 
-    static uint16_t stable_cnt = 0;
-    uint8_t is_stable = (fabsf(gx_comp) < 2.0f) && (fabsf(gy_comp) < 2.0f) && (fabsf(gz_comp) < 2.0f);
+  static uint16_t stable_cnt = 0;
+  uint8_t is_stable = (fabsf(gx_comp) < 2.0f) && (fabsf(gy_comp) < 2.0f) &&
+                      (fabsf(gz_comp) < 2.0f);
 
-    if (is_stable)
-    {
-        stable_cnt++;
-    }
-    else
-    {
-        stable_cnt = 0;
-        ix = 0.0f;
-        iy = 0.0f;
-        iz = 0.0f;
-    }
+  if (is_stable) {
+    stable_cnt++;
+  } else {
+    stable_cnt = 0;
+    ix = 0.0f;
+    iy = 0.0f;
+    iz = 0.0f;
+  }
 
-    float q0 = quat.w, q1 = quat.x, q2 = quat.y, q3 = quat.z;
-    
-    float gx_rad = gx_comp * 0.0174533f;
-    float gy_rad = gy_comp * 0.0174533f;
-    float gz_rad = gz_comp * 0.0174533f;
-    
-    float half_dt = DT * 0.5f;
-    
-    float dq0 = (-q1*gx_rad - q2*gy_rad - q3*gz_rad) * half_dt;
-    float dq1 = (q0*gx_rad + q2*gz_rad - q3*gy_rad) * half_dt;
-    float dq2 = (q0*gy_rad - q1*gz_rad + q3*gx_rad) * half_dt;
-    float dq3 = (q0*gz_rad + q1*gy_rad - q2*gx_rad) * half_dt;
+  float q0 = quat.w, q1 = quat.x, q2 = quat.y, q3 = quat.z;
 
-    float acc_norm = sqrtf(*ax * *ax + *ay * *ay + *az * *az);
-    if (stable_cnt > 10 && acc_norm > 0.85f && acc_norm < 1.15f)
-    {
-        float ax_n = *ax / acc_norm;
-        float ay_n = *ay / acc_norm;
-        float az_n = *az / acc_norm;
+  float gx_rad = gx_comp * 0.0174533f;
+  float gy_rad = gy_comp * 0.0174533f;
+  float gz_rad = gz_comp * 0.0174533f;
 
-        float vx = 2.0f * (q1*q3 - q0*q2);
-        float vy = 2.0f * (q0*q1 + q2*q3);
-        float vz = q0*q0 - q1*q1 - q2*q2 + q3*q3;
+  float half_dt = DT * 0.5f;
 
-        float ex = ay_n * vz - az_n * vy;
-        float ey = az_n * vx - ax_n * vz;
-        float ez = ax_n * vy - ay_n * vx;
+  float dq0 = (-q1 * gx_rad - q2 * gy_rad - q3 * gz_rad) * half_dt;
+  float dq1 = (q0 * gx_rad + q2 * gz_rad - q3 * gy_rad) * half_dt;
+  float dq2 = (q0 * gy_rad - q1 * gz_rad + q3 * gx_rad) * half_dt;
+  float dq3 = (q0 * gz_rad + q1 * gy_rad - q2 * gx_rad) * half_dt;
 
-        const float Kp = 0.5f;
-        const float Ki = 0.001f;
-        
-        ix += ex * Ki;
-        iy += ey * Ki;
-        iz += ez * Ki;
-
-        dq1 += (ex * Kp + ix) * half_dt;
-        dq2 += (ey * Kp + iy) * half_dt;
-        dq3 += (ez * Kp + iz) * half_dt;
-    }
-
-    quat.w += dq0;
-    quat.x += dq1;
-    quat.y += dq2;
-    quat.z += dq3;
-    
-    quat_normalize();
-
-    if (stable_cnt > 100)
-    {
-        gx_bias = gx_bias * 0.999f + *gx * 0.001f;
-        gy_bias = gy_bias * 0.999f + *gy * 0.001f;
-        gyro_bias.gz_bias = gyro_bias.gz_bias * 0.999f + *gz * 0.001f;
-    }
-
-    q0 = quat.w;
-    q1 = quat.x;
-    q2 = quat.y;
-    q3 = quat.z;
+  float acc_norm = sqrtf(*ax * *ax + *ay * *ay + *az * *az);
+  if (stable_cnt > 10 && acc_norm > 0.85f && acc_norm < 1.15f) {
+    float ax_n = *ax / acc_norm;
+    float ay_n = *ay / acc_norm;
+    float az_n = *az / acc_norm;
 
     float vx = 2.0f * (q1 * q3 - q0 * q2);
     float vy = 2.0f * (q0 * q1 + q2 * q3);
     float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 
-    att.pitch = atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
-    att.roll = atan2f(vy, vz) * 57.3f;
+    float ex = ay_n * vz - az_n * vy;
+    float ey = az_n * vx - ax_n * vz;
+    float ez = ax_n * vy - ay_n * vx;
 
-    att.yaw_now += gz_comp * DT;
+    const float Kp = 0.5f;
+    const float Ki = 0.001f;
 
-    while (att.yaw_now > 180.0f)
-        att.yaw_now -= 360.0f;
-    while (att.yaw_now < -180.0f)
-        att.yaw_now += 360.0f;
+    ix += ex * Ki;
+    iy += ey * Ki;
+    iz += ez * Ki;
+
+    dq1 += (ex * Kp + ix) * half_dt;
+    dq2 += (ey * Kp + iy) * half_dt;
+    dq3 += (ez * Kp + iz) * half_dt;
+  }
+
+  quat.w += dq0;
+  quat.x += dq1;
+  quat.y += dq2;
+  quat.z += dq3;
+
+  quat_normalize();
+
+  if (stable_cnt > 100) {
+    gx_bias = gx_bias * 0.999f + *gx * 0.001f;
+    gy_bias = gy_bias * 0.999f + *gy * 0.001f;
+    gyro_bias.gz_bias = gyro_bias.gz_bias * 0.999f + *gz * 0.001f;
+  }
+
+  q0 = quat.w;
+  q1 = quat.x;
+  q2 = quat.y;
+  q3 = quat.z;
+
+  float vx = 2.0f * (q1 * q3 - q0 * q2);
+  float vy = 2.0f * (q0 * q1 + q2 * q3);
+  float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
+
+  att.pitch = atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
+  att.roll = atan2f(vy, vz) * 57.3f;
+
+  att.yaw_now += gz_comp * DT;
+
+  while (att.yaw_now > 180.0f)
+    att.yaw_now -= 360.0f;
+  while (att.yaw_now < -180.0f)
+    att.yaw_now += 360.0f;
 }
 
 /**
  * @brief 夜间9轴融合解算（无大车干扰，地磁缓慢修正Yaw积分漂移）
  */
-void attitude_calc_9axis(void)
-{
-    attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx, &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
-    
-    // 磁力计修正：仅在夜间模式、静止且无地磁干扰时执行
-    if (day_mode == 0 && mag_disturb_flag == 0)
-    {
-        float pitch_rad = att.pitch * 0.0174533f;
-        float cos_p = cosf(pitch_rad);
-        
-        if (fabsf(cos_p) > 0.15f)
-        {
-            float roll_rad = att.roll * 0.0174533f;
-            float sin_p = sinf(pitch_rad);
-            float cos_r = cosf(roll_rad);
-            float sin_r = sinf(roll_rad);
-            
-            float mx_h = mag_raw.mx * cos_p + mag_raw.mz * sin_p;
-            float my_h = mag_raw.mx * sin_r * sin_p + mag_raw.my * cos_r - mag_raw.mz * sin_r * cos_p;
-            
-            float mag_yaw = atan2f(my_h, mx_h) * 57.3f;
-            float yaw_err = mag_yaw - att.yaw_now;
-            if (yaw_err > 180.0f)
-                yaw_err -= 360.0f;
-            if (yaw_err < -180.0f)
-                yaw_err += 360.0f;
-            
-            att.yaw_now += yaw_err * 0.01f;
-        }
+void attitude_calc_9axis(void) {
+  attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx,
+                      &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
+
+  // 磁力计修正：仅在夜间模式、静止且无地磁干扰时执行
+  if (day_mode == 0 && mag_disturb_flag == 0) {
+    float pitch_rad = att.pitch * 0.0174533f;
+    float cos_p = cosf(pitch_rad);
+
+    if (fabsf(cos_p) > 0.15f) {
+      float roll_rad = att.roll * 0.0174533f;
+      float sin_p = sinf(pitch_rad);
+      float cos_r = cosf(roll_rad);
+      float sin_r = sinf(roll_rad);
+
+      float mx_h = mag_raw.mx * cos_p + mag_raw.mz * sin_p;
+      float my_h = mag_raw.mx * sin_r * sin_p + mag_raw.my * cos_r -
+                   mag_raw.mz * sin_r * cos_p;
+
+      float mag_yaw = atan2f(my_h, mx_h) * 57.3f;
+      float yaw_err = mag_yaw - att.yaw_now;
+      if (yaw_err > 180.0f)
+        yaw_err -= 360.0f;
+      if (yaw_err < -180.0f)
+        yaw_err += 360.0f;
+
+      att.yaw_now += yaw_err * 0.01f;
     }
+  }
 }
 
-/************************ GD32 Flash读写（存储安装标定零点） ************************/
+/************************ GD32 Flash读写（存储安装标定零点）
+ * ************************/
 /**
  * @brief Flash读取，直接映射地址读取
  */
-void flash_read(uint32_t addr, void *data, uint16_t len)
-{
-    memcpy(data, (void *)addr, len);
+void flash_read(uint32_t addr, void *data, uint16_t len) {
+  memcpy(data, (void *)addr, len);
 }
 
 /**
  * @brief Flash页擦除+字写入
  */
-void flash_write(uint32_t addr, void *data, uint16_t len)
-{
-    uint32_t page_addr = addr - (addr % FLASH_PAGE_SIZE);
-    uint32_t *src = (uint32_t *)data;
-    uint16_t word_cnt = len / 4U;
+void flash_write(uint32_t addr, void *data, uint16_t len) {
+  uint32_t page_addr = addr - (addr % FLASH_PAGE_SIZE);
+  uint32_t *src = (uint32_t *)data;
+  uint16_t word_cnt = len / 4U;
 
-    fmc_unlock();
-    fmc_page_erase(page_addr);
-    for (uint16_t i = 0; i < word_cnt; i++)
-    {
-        fmc_word_program(addr + i * 4, src[i]);
-    }
-    fmc_lock();
+  fmc_unlock();
+  fmc_page_erase(page_addr);
+  for (uint16_t i = 0; i < word_cnt; i++) {
+    fmc_word_program(addr + i * 4, src[i]);
+  }
+  fmc_lock();
 }
 
 /**
  * @brief 现场安装标定函数，采集500帧取平均保存基准零点
  * 设备安装调平后调用一次，断电永久保存
  */
-void save_install_zero_point(void)
-{
-    float yaw_sum = 0.0f, pit_sum = 0.0f, rol_sum = 0.0f;
-    // 连续采集5秒数据取平均，消除瞬时抖动
-    for (uint16_t i = 0; i < 500; i++)
-    {
-        icm42670_get_raw_data();
-        attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx, &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
-        yaw_sum += att.yaw_now;
-        pit_sum += att.pitch;
-        rol_sum += att.roll;
-        delay_ms(10);
-    }
-    // 保存安装基准零点
-    att.yaw_base = yaw_sum / 500.0f;
-    att.pitch_base = pit_sum / 500.0f;
-    att.roll_base = rol_sum / 500.0f;
-    gyro_bias.temp_ref = icm_raw.temp;
+void save_install_zero_point(void) {
+  float yaw_sum = 0.0f, pit_sum = 0.0f, rol_sum = 0.0f;
+  // 连续采集5秒数据取平均，消除瞬时抖动
+  for (uint16_t i = 0; i < 500; i++) {
+    icm42670_get_raw_data();
+    attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx,
+                        &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
+    yaw_sum += att.yaw_now;
+    pit_sum += att.pitch;
+    rol_sum += att.roll;
+    delay_ms(10);
+  }
+  // 保存安装基准零点
+  att.yaw_base = yaw_sum / 500.0f;
+  att.pitch_base = pit_sum / 500.0f;
+  att.roll_base = rol_sum / 500.0f;
+  gyro_bias.temp_ref = icm_raw.temp;
 
-    // 双分区备份，防止存储损坏丢失零点
-    flash_write(FLASH_ZONE_A, &att, sizeof(attitude_info_t));
-    flash_write(FLASH_ZONE_B, &att, sizeof(attitude_info_t));
-    flash_write(FLASH_GYRO_BIAS, &gyro_bias, sizeof(gyro_bias_t));
+  // 双分区备份，防止存储损坏丢失零点
+  flash_write(FLASH_ZONE_A, &att, sizeof(attitude_info_t));
+  flash_write(FLASH_ZONE_B, &att, sizeof(attitude_info_t));
+  flash_write(FLASH_GYRO_BIAS, &gyro_bias, sizeof(gyro_bias_t));
 }
 
 /**
  * @brief 上电加载安装标定零点
  */
-void load_install_zero_point(void)
-{
-    flash_read(FLASH_ZONE_A, &att, sizeof(attitude_info_t));
-    flash_read(FLASH_GYRO_BIAS, &gyro_bias, sizeof(gyro_bias_t));
+void load_install_zero_point(void) {
+  flash_read(FLASH_ZONE_A, &att, sizeof(attitude_info_t));
+  flash_read(FLASH_GYRO_BIAS, &gyro_bias, sizeof(gyro_bias_t));
 
-    if (isnan(att.pitch_base) || isnan(att.yaw_now) || att.pitch_base > 1000.0f || att.pitch_base < -1000.0f)
-    {
-        att.pitch = 0.0f;
-        att.roll = 0.0f;
-        att.pitch_base = 0.0f;
-        att.roll_base = 0.0f;
-        att.yaw_base = 0.0f;
-        att.yaw_now = 0.0f;
-        gyro_bias.gz_bias = 0.0f;
-        gyro_bias.temp_ref = 25.0f;
-        printf("Flash data invalid, using default zero point!\n");
-    }
+  if (isnan(att.pitch_base) || isnan(att.yaw_now) || att.pitch_base > 1000.0f ||
+      att.pitch_base < -1000.0f) {
+    att.pitch = 0.0f;
+    att.roll = 0.0f;
+    att.pitch_base = 0.0f;
+    att.roll_base = 0.0f;
+    att.yaw_base = 0.0f;
+    att.yaw_now = 0.0f;
+    gyro_bias.gz_bias = 0.0f;
+    gyro_bias.temp_ref = 25.0f;
+    printf("Flash data invalid, using default zero point!\n");
+  }
 }
 
 /************************ RS485串口上报函数 ************************/
 /**
  * @brief 串口发送字符串
  */
-void usart_send_string(char *str)
-{
-    uint16_t len = strlen(str);
-    for (uint16_t i = 0; i < len; i++)
-    {
-        while (usart_flag_get(USART_RS485, USART_FLAG_TBE) == RESET)
-            ;
-        usart_data_transmit(USART_RS485, str[i]);
-    }
-    while (usart_flag_get(USART_RS485, USART_FLAG_TC) == RESET)
-        ;
+void usart_send_string(char *str) {
+  uint16_t len = strlen(str);
+  for (uint16_t i = 0; i < len; i++) {
+    while (usart_flag_get(USART_RS485, USART_FLAG_TBE) == RESET)
+      ;
+    usart_data_transmit(USART_RS485, str[i]);
+  }
+  while (usart_flag_get(USART_RS485, USART_FLAG_TC) == RESET)
+    ;
 }
 
 /**
  * @brief 发送报警信息
  * @param fault_type:0x01倾斜故障 0x02旋转故障 0x03同时故障
  */
-void send_alarm_info(uint8_t fault_type, float pit, float rol, float yaw)
-{
-    static uint16_t alarm_print_cnt = 0;
-    alarm_print_cnt++;
-    if (alarm_print_cnt >= 100)
-    {
-        char buf[64] = {0};
-        sprintf(buf, "FAULT:%d,P=%.1f,R=%.1f,Y=%.1f\r\n", fault_type, pit, rol, yaw);
-        printf("%s", buf);
-        alarm_print_cnt = 0;
-    }
+void send_alarm_info(uint8_t fault_type, float pit, float rol, float yaw) {
+  static uint16_t alarm_print_cnt = 0;
+  alarm_print_cnt++;
+  if (alarm_print_cnt >= 100) {
+    char buf[64] = {0};
+    sprintf(buf, "FAULT:%d,P=%.1f,R=%.1f,Y=%.1f\r\n", fault_type, pit, rol,
+            yaw);
+    printf("%s", buf);
+    alarm_print_cnt = 0;
+  }
 }
 
 /************************ 昼夜模式切换（RTC小时判定） ************************/
-void update_day_night_mode(uint8_t rtc_hour)
-{
-    // 6点~22点白天6轴模式，其余夜间9轴融合
-    if (rtc_hour >= 6 && rtc_hour < 22)
-        day_mode = 1;
-    else
-        day_mode = 0;
+void update_day_night_mode(uint8_t rtc_hour) {
+  // 6点~22点白天6轴模式，其余夜间9轴融合
+  if (rtc_hour >= 6 && rtc_hour < 22)
+    day_mode = 1;
+  else
+    day_mode = 0;
 }
 
-/************************ 主循环调度函数（10ms定时调用） ************************/
+/************************ 主循环调度函数（10ms定时调用）
+ * ************************/
 /**
  * @brief 定时10ms执行一次，传入RTC当前小时
  */
-void imu_main_loop(uint8_t rtc_hour)
-{
-    // 更新昼夜工作模式
-    // printf("main loop\n");
-    // usart_interrupt_enable(USART0, USART_INT_TBE);
-    update_day_night_mode(rtc_hour);
+void imu_main_loop(uint8_t rtc_hour) {
+  // 更新昼夜工作模式
+  // printf("main loop\n");
+  // usart_interrupt_enable(USART0, USART_INT_TBE);
+  update_day_night_mode(rtc_hour);
 
-    // 采集传感器原始数据
-    icm42670_get_raw_data();
-    qmc5883p_get_raw_data();
-    // 检测前后地磁向量模长，参数值判断磁场是否被干扰
-    mag_disturb_detect();
+  // 采集传感器原始数据
+  icm42670_get_raw_data();
+  qmc5883p_get_raw_data();
+  // 检测前后地磁向量模长，参数值判断磁场是否被干扰
+  mag_disturb_detect();
 
-    // 分时姿态解算
-    // if (day_mode == 1)
-        attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx, &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
-    // else
-    //     attitude_calc_9axis();
+  // 分时姿态解算
+  // if (day_mode == 1)
+  attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx,
+                      &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
+  // else
+  //     attitude_calc_9axis();
 
-    // 计算当前角度相对安装零点的偏移量
-    float yaw_offset = fabsf(att.yaw_now - att.yaw_base);
-    if (yaw_offset > 180.0f)
-        yaw_offset = 360.0f - yaw_offset;
-    float pit_offset = fabsf(att.pitch - att.pitch_base);
-    float rol_offset = fabsf(att.roll - att.roll_base);
+  // 计算当前角度相对安装零点的偏移量
+  float yaw_offset = fabsf(att.yaw_now - att.yaw_base);
+  if (yaw_offset > 180.0f)
+    yaw_offset = 360.0f - yaw_offset;
+  float pit_offset = fabsf(att.pitch - att.pitch_base);
+  float rol_offset = fabsf(att.roll - att.roll_base);
 
-    uint8_t trigger_alarm = 0;
-    // 任意轴偏移超过10°触发故障判定
-    if (pit_offset >= ANGLE_ALARM_THRESHOLD || rol_offset >= ANGLE_ALARM_THRESHOLD || yaw_offset >= ANGLE_ALARM_THRESHOLD)
-    {
-        trigger_alarm = 1;
+  uint8_t trigger_alarm = 0;
+  // 任意轴偏移超过10°触发故障判定
+  if (pit_offset >= ANGLE_ALARM_THRESHOLD ||
+      rol_offset >= ANGLE_ALARM_THRESHOLD ||
+      yaw_offset >= ANGLE_ALARM_THRESHOLD) {
+    trigger_alarm = 1;
+  }
+
+  // 2s防抖滤波，瞬时震动不报警
+  if (trigger_alarm == 1) {
+    alarm_filter_cnt++;
+    if (alarm_filter_cnt > ALARM_FILTER_CNT) {
+      uint8_t fault_type = 0;
+      // X/Y轴倾斜故障标记
+      if (pit_offset >= ANGLE_ALARM_THRESHOLD ||
+          rol_offset >= ANGLE_ALARM_THRESHOLD)
+        fault_type |= 0x01;
+      // Z轴绕灯杆旋转故障标记
+      if (yaw_offset >= ANGLE_ALARM_THRESHOLD)
+        fault_type |= 0x02;
+      // send_alarm_info(fault_type, att.pitch, att.roll, att.yaw_now);
+      alarm_filter_cnt = ALARM_FILTER_CNT;
     }
-
-    // 2s防抖滤波，瞬时震动不报警
-    if (trigger_alarm == 1)
-    {
-        alarm_filter_cnt++;
-        if (alarm_filter_cnt > ALARM_FILTER_CNT)
-        {
-            uint8_t fault_type = 0;
-            // X/Y轴倾斜故障标记
-            if (pit_offset >= ANGLE_ALARM_THRESHOLD || rol_offset >= ANGLE_ALARM_THRESHOLD)
-                fault_type |= 0x01;
-            // Z轴绕灯杆旋转故障标记
-            if (yaw_offset >= ANGLE_ALARM_THRESHOLD)
-                fault_type |= 0x02;
-            // send_alarm_info(fault_type, att.pitch, att.roll, att.yaw_now);
-            alarm_filter_cnt = ALARM_FILTER_CNT;
-        }
-    }
-    else
-    {
-        alarm_filter_cnt = 0;
-    }
+  } else {
+    alarm_filter_cnt = 0;
+  }
 }
 
 /************************ 系统总初始化入口 ************************/
@@ -638,11 +606,10 @@ void imu_main_loop(uint8_t rtc_hour)
  * @brief 传感器系统初始化
  * 外部需提前初始化：GPIO、I2C0/I2C1、USART1、Systick、RTC、定时器
  */
-void imu_system_init(void)
-{
-    icm42670_init();
-    qmc5883p_init();
-    load_install_zero_point(); // 上电加载安装标定零点
+void imu_system_init(void) {
+  icm42670_init();
+  qmc5883p_init();
+  load_install_zero_point(); // 上电加载安装标定零点
 }
 
 // ## 外部补充初始化说明（需要自行添加）
@@ -654,86 +621,86 @@ void imu_system_init(void)
 // 6. 上位机下发标定指令时调用 `save_install_zero_point()` 保存安装零点。
 
 // ## 核心业务逻辑亮点
-// 1. **大车磁场干扰规避**：白天车流高峰自动关闭地磁航向融合，仅用陀螺积分计算绕杆旋转，不会因货车金属车体造成角度跳变误报警；
-// 2. **三轴统一报警**：俯仰X、横滚Y、旋转Z任意一轴偏移＞10°，持续2秒稳定后上报，区分倾斜/旋转两种故障码；
+// 1.
+// **大车磁场干扰规避**：白天车流高峰自动关闭地磁航向融合，仅用陀螺积分计算绕杆旋转，不会因货车金属车体造成角度跳变误报警；
+// 2.
+// **三轴统一报警**：俯仰X、横滚Y、旋转Z任意一轴偏移＞10°，持续2秒稳定后上报，区分倾斜/旋转两种故障码；
 // 3. **断电保存标定零点**：Flash双备份存储安装基准，设备拆装后无需重新标定；
 // 4. **陀螺温漂抑制**：设备静止时自动平滑更新Z轴零偏，长期运行角度漂移小；
-// 5. **夜间漂移修正**：夜间车流稀少，地磁缓慢修正陀螺长时间积分误差，保证长期精度。
+// 5.
+// **夜间漂移修正**：夜间车流稀少，地磁缓慢修正陀螺长时间积分误差，保证长期精度。
 
-void com_usart_init(void)
-{
-    // /* enable GPIO clock */
-    // rcu_periph_clock_enable(RCU_GPIOA);
-    // /* enable USART clock */
-    // rcu_periph_clock_enable(RCU_USART0);
+void com_usart_init(void) {
+  // /* enable GPIO clock */
+  // rcu_periph_clock_enable(RCU_GPIOA);
+  // /* enable USART clock */
+  // rcu_periph_clock_enable(RCU_USART0);
 
-    // /* connect port to USART TX */
-    // gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_9);
+  // /* connect port to USART TX */
+  // gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_9);
 
-    // /* connect port to USART RX */
-    // gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
+  // /* connect port to USART RX */
+  // gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
 
-    // /* configure USART TX as alternate function push-pull */
-    // gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
-    // gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_9);
+  // /* configure USART TX as alternate function push-pull */
+  // gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
+  // gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ,
+  // GPIO_PIN_9);
 
-    // /* configure USART RX as alternate function push-pull */
-    // gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
-    // gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_10);
-    // /* USART configure */
-    // usart_deinit(USART0);
-    // usart_word_length_set(USART0, USART_WL_8BIT);
-    // usart_stop_bit_set(USART0, USART_STB_1BIT);
-    // usart_parity_config(USART0, USART_PM_NONE);
-    // usart_baudrate_set(USART0, 115200U);
-    // usart_receive_config(USART0, USART_RECEIVE_ENABLE);
-    // usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
+  // /* configure USART RX as alternate function push-pull */
+  // gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
+  // gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ,
+  // GPIO_PIN_10);
+  // /* USART configure */
+  // usart_deinit(USART0);
+  // usart_word_length_set(USART0, USART_WL_8BIT);
+  // usart_stop_bit_set(USART0, USART_STB_1BIT);
+  // usart_parity_config(USART0, USART_PM_NONE);
+  // usart_baudrate_set(USART0, 115200U);
+  // usart_receive_config(USART0, USART_RECEIVE_ENABLE);
+  // usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
 
-    // usart_enable(USART0);
+  // usart_enable(USART0);
 
-    /* enable GPIO clock */
-    rcu_periph_clock_enable(RCU_GPIOA);
-    /* enable USART clock */
-    rcu_periph_clock_enable(RCU_USART0);
+  /* enable GPIO clock */
+  rcu_periph_clock_enable(RCU_GPIOA);
+  /* enable USART clock */
+  rcu_periph_clock_enable(RCU_USART0);
 
-    /* connect port to USART TX */
-    gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_9);
+  /* connect port to USART TX */
+  gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_9);
 
-    /* connect port to USART RX */
-    gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
+  /* connect port to USART RX */
+  gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
 
-    /* configure USART TX as alternate function push-pull */
-    gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
-    gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_9);
+  /* configure USART TX as alternate function push-pull */
+  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_9);
 
-    /* configure USART RX as alternate function push-pull */
-    gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
-    gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_10);
+  /* configure USART RX as alternate function push-pull */
+  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_10);
 
-    /* configure USART */
-    usart_deinit(USART0);
-    usart_word_length_set(USART0, USART_WL_8BIT);
-    usart_stop_bit_set(USART0, USART_STB_1BIT);
-    usart_parity_config(USART0, USART_PM_NONE);
-    usart_baudrate_set(USART0, 115200U);
-    usart_receive_config(USART0, USART_RECEIVE_ENABLE);
-    usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
-    usart_enable(USART0);
+  /* configure USART */
+  usart_deinit(USART0);
+  usart_word_length_set(USART0, USART_WL_8BIT);
+  usart_stop_bit_set(USART0, USART_STB_1BIT);
+  usart_parity_config(USART0, USART_PM_NONE);
+  usart_baudrate_set(USART0, 115200U);
+  usart_receive_config(USART0, USART_RECEIVE_ENABLE);
+  usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
+  usart_enable(USART0);
 }
 
-void rcu_config(void)
-{
-    rcu_periph_clock_enable(RCU_GPIOA);
-}
+void rcu_config(void) { rcu_periph_clock_enable(RCU_GPIOA); }
 
-void gpio_config(void)
-{
-    gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_0);
-    gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_1);
-    gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_0);
-    gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0);
-    gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_1);
-    gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_1);
+void gpio_config(void) {
+  gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_0);
+  gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_1);
+  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_0);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0);
+  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_1);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_1);
 }
 
 /*!
@@ -742,27 +709,23 @@ void gpio_config(void)
     \param[out] none
     \retval     none
 */
-void i2c_config(void)
-{
-    soft_i2c_init();
-}
+void i2c_config(void) { soft_i2c_init(); }
 
-void i2c_test(void)
-{
-    printf("Soft I2C test with ACK detection...\n");
+void i2c_test(void) {
+  printf("Soft I2C test with ACK detection...\n");
 
-    soft_i2c_init();
+  soft_i2c_init();
 
-    for (uint32_t j = 0; j < 5; j++)
-    {
-        soft_i2c_start();
-        uint8_t ack = soft_i2c_send_byte(0xD0);
-        printf("Try %lu: Send addr 0xD0, ack=%u (%s)\n", j, ack, ack == 0 ? "ACK received" : "NACK");
-        soft_i2c_stop();
-        delay_ms(50);
-    }
+  for (uint32_t j = 0; j < 5; j++) {
+    soft_i2c_start();
+    uint8_t ack = soft_i2c_send_byte(0xD0);
+    printf("Try %lu: Send addr 0xD0, ack=%u (%s)\n", j, ack,
+           ack == 0 ? "ACK received" : "NACK");
+    soft_i2c_stop();
+    delay_ms(50);
+  }
 
-    printf("Soft I2C test done!\n");
+  printf("Soft I2C test done!\n");
 }
 
 #define SOFT_I2C_SCL_PIN GPIO_PIN_0
@@ -775,193 +738,177 @@ void i2c_test(void)
 #define SDA_L() gpio_bit_reset(SOFT_I2C_PORT, SOFT_I2C_SDA_PIN)
 #define SDA_IN() gpio_input_bit_get(SOFT_I2C_PORT, SOFT_I2C_SDA_PIN)
 
-void soft_i2c_init(void)
-{
-    rcu_periph_clock_enable(RCU_GPIOA);
+void soft_i2c_init(void) {
+  rcu_periph_clock_enable(RCU_GPIOA);
 
-    gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_0 | GPIO_PIN_1);
-    gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0 | GPIO_PIN_1);
+  gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP,
+                GPIO_PIN_0 | GPIO_PIN_1);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ,
+                          GPIO_PIN_0 | GPIO_PIN_1);
 
-    SCL_H();
-    SDA_H();
-    delay_ms(10);
+  SCL_H();
+  SDA_H();
+  delay_ms(10);
 }
 
-void soft_i2c_start(void)
-{
-    SDA_H();
-    SCL_H();
-    delay_us(5);
-    SDA_L();
-    delay_us(5);
-    SCL_L();
-    delay_us(5);
+void soft_i2c_start(void) {
+  SDA_H();
+  SCL_H();
+  delay_us(5);
+  SDA_L();
+  delay_us(5);
+  SCL_L();
+  delay_us(5);
 }
 
-void soft_i2c_stop(void)
-{
-    SDA_L();
-    SCL_H();
-    delay_us(5);
-    SDA_H();
-    delay_us(5);
+void soft_i2c_stop(void) {
+  SDA_L();
+  SCL_H();
+  delay_us(5);
+  SDA_H();
+  delay_us(5);
 }
 
-uint8_t soft_i2c_send_byte(uint8_t byte)
-{
-    uint8_t i;
+uint8_t soft_i2c_send_byte(uint8_t byte) {
+  uint8_t i;
 
-    for (i = 0; i < 8; i++)
-    {
-        SCL_L();
-        delay_us(3);
-        if (byte & 0x80)
-        {
-            SDA_H();
-        }
-        else
-        {
-            SDA_L();
-        }
-        delay_us(2);
-        SCL_H();
-        delay_us(5);
-        byte <<= 1;
-    }
-
+  for (i = 0; i < 8; i++) {
     SCL_L();
     delay_us(3);
-    SDA_H();
-    delay_us(2);
-    SCL_H();
-    delay_us(5);
-
-    uint8_t ack = SDA_IN();
-
-    SCL_L();
-    delay_us(5);
-
-    return (ack == 0) ? 0 : 1;
-}
-
-uint8_t soft_i2c_read_byte(uint8_t ack)
-{
-    uint8_t i, byte = 0;
-
-    SDA_H();
-
-    for (i = 0; i < 8; i++)
-    {
-        SCL_L();
-        delay_us(5);
-        SCL_H();
-        delay_us(3);
-        byte <<= 1;
-        if (SDA_IN())
-        {
-            byte |= 0x01;
-        }
-        delay_us(2);
-    }
-
-    SCL_L();
-    delay_us(3);
-    if (ack)
-    {
-        SDA_L();
-    }
-    else
-    {
-        SDA_H();
+    if (byte & 0x80) {
+      SDA_H();
+    } else {
+      SDA_L();
     }
     delay_us(2);
     SCL_H();
     delay_us(5);
+    byte <<= 1;
+  }
 
+  SCL_L();
+  delay_us(3);
+  SDA_H();
+  delay_us(2);
+  SCL_H();
+  delay_us(5);
+
+  uint8_t ack = SDA_IN();
+
+  SCL_L();
+  delay_us(5);
+
+  return (ack == 0) ? 0 : 1;
+}
+
+uint8_t soft_i2c_read_byte(uint8_t ack) {
+  uint8_t i, byte = 0;
+
+  SDA_H();
+
+  for (i = 0; i < 8; i++) {
     SCL_L();
     delay_us(5);
-
-    return byte;
-}
-
-void timer_config(void)
-{
-    timer_parameter_struct timer_initpara;
-
-    /* 1. 使能 TIMER1 时钟 */
-    rcu_periph_clock_enable(RCU_TIMER1);
-
-    /* 2. 复位 TIMER1 */
-    timer_deinit(TIMER1);
-
-    /* 3. 配置 TIMER1 时基单元 */
-    timer_struct_para_init(&timer_initpara);
-    timer_initpara.prescaler = 8400 - 1;                // 预分频值 (系统时钟84MHz，分频后为10kHz)
-    timer_initpara.alignedmode = TIMER_COUNTER_EDGE;    // 边缘对齐模式
-    timer_initpara.counterdirection = TIMER_COUNTER_UP; // 向上计数模式
-    timer_initpara.period = 100 - 1;                    // 自动重装载值 (100个计数周期 = 10ms)
-    timer_initpara.clockdivision = TIMER_CKDIV_DIV1;    // 时钟分频
-    timer_initpara.repetitioncounter = 0;               // 重复计数器设为0
-    timer_init(TIMER1, &timer_initpara);
-
-    /* 4. 使能 TIMER1 更新中断 */
-    timer_interrupt_enable(TIMER1, TIMER_INT_UP);
-
-    /* 5. 配置 NVIC 中断优先级并使能中断 */
-    nvic_irq_enable(TIMER1_IRQn, 0, 1);
-
-    /* 6. 启动定时器 */
-    timer_enable(TIMER1);
-}
-
-int main(void)
-{
-    systick_config();
-    com_usart_init();
-    printf("Hellow word!\n");
-    // sprintf(transmitter_buffer, "HELLO_world!\n");
-    // usart_interrupt_enable(USART0, USART_INT_TBE);
-    // delay_1ms(10);
-
-    // txcount = 0;
-    // usart_interrupt_enable(USART0, USART_INT_TBE);
-    // printf("hello_word");
-    /* configure RCU */
-    rcu_config();
-    /* configure GPIO */
-    gpio_config();
-    /* configure I2C */
-    i2c_config();
-    printf("I2C init done!\n");
-
-    // i2c_test();
-
-    // // soft_i2c_test();
-
-    // gpio_config();
-    // i2c_config();
-
-    // i2c_test();
-
-    imu_system_init();
-    timer_config();
-    printf("timer init done!\n");
-    static uint32_t debug_cnt = 0;
-    while (1)
-    {
-        if (imu_loop_flag)
-        {
-            imu_main_loop(12);
-            imu_loop_flag = 0;
-
-            debug_cnt++;
-            if (debug_cnt % 1 == 0)
-            {
-                printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
-            }
-        }
+    SCL_H();
+    delay_us(3);
+    byte <<= 1;
+    if (SDA_IN()) {
+      byte |= 0x01;
     }
-    return 0;
+    delay_us(2);
+  }
+
+  SCL_L();
+  delay_us(3);
+  if (ack) {
+    SDA_L();
+  } else {
+    SDA_H();
+  }
+  delay_us(2);
+  SCL_H();
+  delay_us(5);
+
+  SCL_L();
+  delay_us(5);
+
+  return byte;
+}
+
+void timer_config(void) {
+  timer_parameter_struct timer_initpara;
+
+  /* 1. 使能 TIMER1 时钟 */
+  rcu_periph_clock_enable(RCU_TIMER1);
+
+  /* 2. 复位 TIMER1 */
+  timer_deinit(TIMER1);
+
+  /* 3. 配置 TIMER1 时基单元 */
+  timer_struct_para_init(&timer_initpara);
+  timer_initpara.prescaler =
+      8400 - 1; // 预分频值 (系统时钟84MHz，分频后为10kHz)
+  timer_initpara.alignedmode = TIMER_COUNTER_EDGE;    // 边缘对齐模式
+  timer_initpara.counterdirection = TIMER_COUNTER_UP; // 向上计数模式
+  timer_initpara.period = 100 - 1; // 自动重装载值 (100个计数周期 = 10ms)
+  timer_initpara.clockdivision = TIMER_CKDIV_DIV1; // 时钟分频
+  timer_initpara.repetitioncounter = 0;            // 重复计数器设为0
+  timer_init(TIMER1, &timer_initpara);
+
+  /* 4. 使能 TIMER1 更新中断 */
+  timer_interrupt_enable(TIMER1, TIMER_INT_UP);
+
+  /* 5. 配置 NVIC 中断优先级并使能中断 */
+  nvic_irq_enable(TIMER1_IRQn, 0, 1);
+
+  /* 6. 启动定时器 */
+  timer_enable(TIMER1);
+}
+
+int main(void) {
+  systick_config();
+  com_usart_init();
+  printf("Hellow word!\n");
+  // sprintf(transmitter_buffer, "HELLO_world!\n");
+  // usart_interrupt_enable(USART0, USART_INT_TBE);
+  // delay_1ms(10);
+
+  // txcount = 0;
+  // usart_interrupt_enable(USART0, USART_INT_TBE);
+  // printf("hello_word");
+  /* configure RCU */
+  rcu_config();
+  /* configure GPIO */
+  gpio_config();
+  /* configure I2C */
+  i2c_config();
+  printf("I2C init done!\n");
+
+  // i2c_test();
+
+  // // soft_i2c_test();
+
+  // gpio_config();
+  // i2c_config();
+
+  // i2c_test();
+
+  imu_system_init();
+  timer_config();
+  printf("timer init done!\n");
+  static uint32_t debug_cnt = 0;
+  while (1) {
+    if (imu_loop_flag) {
+      imu_main_loop(12);
+      imu_loop_flag = 0;
+
+      debug_cnt++;
+      if (debug_cnt % 1 == 0) {
+        printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
+      }
+    }
+  }
+  return 0;
 }
 
 // #include "gd32f3x0.h"
@@ -979,10 +926,12 @@ int main(void)
 //     gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
 
 //     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
-//     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_9);
+//     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ,
+//     GPIO_PIN_9);
 
 //     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
-//     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ, GPIO_PIN_10);
+//     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ,
+//     GPIO_PIN_10);
 
 //     usart_deinit(USART0);
 //     usart_word_length_set(USART0, USART_WL_8BIT);
