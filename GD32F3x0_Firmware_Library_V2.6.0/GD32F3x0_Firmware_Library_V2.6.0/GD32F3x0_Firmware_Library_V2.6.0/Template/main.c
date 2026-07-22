@@ -383,8 +383,8 @@ void attitude_calc_6axis(float *ax, float *ay, float *az, float *gx, float *gy,
   float vy = 2.0f * (q0 * q1 + q2 * q3);
   float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 
-  att.pitch = atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
-  att.roll = atan2f(vy, vz) * 57.3f;
+  att.pitch = -atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
+  att.roll = -atan2f(vy, vz) * 57.3f;
 
   att.yaw_now += gz_comp * DT;
 
