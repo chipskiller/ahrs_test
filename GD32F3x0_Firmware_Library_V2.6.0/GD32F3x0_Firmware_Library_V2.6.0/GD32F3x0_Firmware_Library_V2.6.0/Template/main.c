@@ -284,7 +284,7 @@ static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg)
  * 内部使用四元数进行姿态更新，避免万向节锁
  * 输出仍然是欧拉角（pitch, roll, yaw_now）
  */
-void attitude_calc_6axis(void)
+void attitude_calc_6axis(float *ax, float *ay, float *az, float *gx, float *gy, float *gz, float *temp)
 {
     static uint8_t first_run = 1;
     static float gx_bias = 0.0f, gy_bias = 0.0f;
@@ -294,9 +294,9 @@ void attitude_calc_6axis(void)
 
     if (first_run)
     {
-        gx_sum += icm_raw.gx;
-        gy_sum += icm_raw.gy;
-        gz_sum += icm_raw.gz;
+        gx_sum += *gx;
+        gy_sum += *gy;
+        gz_sum += *gz;
         init_cnt++;
 
         if (init_cnt >= 200)
@@ -304,18 +304,18 @@ void attitude_calc_6axis(void)
             gx_bias = gx_sum / 200.0f;
             gy_bias = gy_sum / 200.0f;
             gyro_bias.gz_bias = gz_sum / 200.0f;
-            gyro_bias.temp_ref = icm_raw.temp;
+            gyro_bias.temp_ref = *temp;
 
-            float accel_pitch = atan2f(-icm_raw.ax, sqrtf(icm_raw.ay * icm_raw.ay + icm_raw.az * icm_raw.az)) * 57.3f;
-            float accel_roll = atan2f(icm_raw.ay, icm_raw.az) * 57.3f;
+            float accel_pitch = atan2f(-*ax, sqrtf(*ay * *ay + *az * *az)) * 57.3f;
+            float accel_roll = atan2f(*ay, *az) * 57.3f;
             euler_to_quat(accel_pitch, accel_roll, 0.0f);
 
             first_run = 0;
         }
         else
         {
-            float accel_pitch = atan2f(-icm_raw.ax, sqrtf(icm_raw.ay * icm_raw.ay + icm_raw.az * icm_raw.az)) * 57.3f;
-            float accel_roll = atan2f(icm_raw.ay, icm_raw.az) * 57.3f;
+            float accel_pitch = atan2f(-*ax, sqrtf(*ay * *ay + *az * *az)) * 57.3f;
+            float accel_roll = atan2f(*ay, *az) * 57.3f;
             att.pitch = accel_pitch;
             att.roll = accel_roll;
             att.yaw_now = 0.0f;
@@ -323,9 +323,9 @@ void attitude_calc_6axis(void)
         }
     }
 
-    float gx_comp = icm_raw.gx - gx_bias;
-    float gy_comp = icm_raw.gy - gy_bias;
-    float gz_comp = icm_raw.gz - gyro_bias.gz_bias;
+    float gx_comp = *gx - gx_bias;
+    float gy_comp = *gy - gy_bias;
+    float gz_comp = *gz - gyro_bias.gz_bias;
 
     static uint16_t stable_cnt = 0;
     uint8_t is_stable = (fabsf(gx_comp) < 2.0f) && (fabsf(gy_comp) < 2.0f) && (fabsf(gz_comp) < 2.0f);
@@ -355,20 +355,20 @@ void attitude_calc_6axis(void)
     float dq2 = (q0*gy_rad - q1*gz_rad + q3*gx_rad) * half_dt;
     float dq3 = (q0*gz_rad + q1*gy_rad - q2*gx_rad) * half_dt;
 
-    float acc_norm = sqrtf(icm_raw.ax * icm_raw.ax + icm_raw.ay * icm_raw.ay + icm_raw.az * icm_raw.az);
+    float acc_norm = sqrtf(*ax * *ax + *ay * *ay + *az * *az);
     if (stable_cnt > 10 && acc_norm > 0.85f && acc_norm < 1.15f)
     {
-        float ax = icm_raw.ax / acc_norm;
-        float ay = icm_raw.ay / acc_norm;
-        float az = icm_raw.az / acc_norm;
+        float ax_n = *ax / acc_norm;
+        float ay_n = *ay / acc_norm;
+        float az_n = *az / acc_norm;
 
         float vx = 2.0f * (q1*q3 - q0*q2);
         float vy = 2.0f * (q0*q1 + q2*q3);
         float vz = q0*q0 - q1*q1 - q2*q2 + q3*q3;
 
-        float ex = ay * vz - az * vy;
-        float ey = az * vx - ax * vz;
-        float ez = ax * vy - ay * vx;
+        float ex = ay_n * vz - az_n * vy;
+        float ey = az_n * vx - ax_n * vz;
+        float ez = ax_n * vy - ay_n * vx;
 
         const float Kp = 0.5f;
         const float Ki = 0.001f;
@@ -391,9 +391,9 @@ void attitude_calc_6axis(void)
 
     if (stable_cnt > 100)
     {
-        gx_bias = gx_bias * 0.999f + icm_raw.gx * 0.001f;
-        gy_bias = gy_bias * 0.999f + icm_raw.gy * 0.001f;
-        gyro_bias.gz_bias = gyro_bias.gz_bias * 0.999f + icm_raw.gz * 0.001f;
+        gx_bias = gx_bias * 0.999f + *gx * 0.001f;
+        gy_bias = gy_bias * 0.999f + *gy * 0.001f;
+        gyro_bias.gz_bias = gyro_bias.gz_bias * 0.999f + *gz * 0.001f;
     }
 
     q0 = quat.w;
@@ -421,7 +421,7 @@ void attitude_calc_6axis(void)
  */
 void attitude_calc_9axis(void)
 {
-    attitude_calc_6axis();
+    attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx, &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
     
     // 磁力计修正：仅在夜间模式、静止且无地磁干扰时执行
     if (day_mode == 0 && mag_disturb_flag == 0)
@@ -489,7 +489,7 @@ void save_install_zero_point(void)
     for (uint16_t i = 0; i < 500; i++)
     {
         icm42670_get_raw_data();
-        attitude_calc_6axis();
+        attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx, &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
         yaw_sum += att.yaw_now;
         pit_sum += att.pitch;
         rol_sum += att.roll;
@@ -587,13 +587,14 @@ void imu_main_loop(uint8_t rtc_hour)
     // 采集传感器原始数据
     icm42670_get_raw_data();
     qmc5883p_get_raw_data();
+    // 检测前后地磁向量模长，参数值判断磁场是否被干扰
     mag_disturb_detect();
 
     // 分时姿态解算
-    if (day_mode == 1)
-        attitude_calc_6axis();
-    else
-        attitude_calc_9axis();
+    // if (day_mode == 1)
+        attitude_calc_6axis(&icm_raw.ax, &icm_raw.ay, &icm_raw.az, &icm_raw.gx, &icm_raw.gy, &icm_raw.gz, &icm_raw.temp);
+    // else
+    //     attitude_calc_9axis();
 
     // 计算当前角度相对安装零点的偏移量
     float yaw_offset = fabsf(att.yaw_now - att.yaw_base);
@@ -954,9 +955,9 @@ int main(void)
             imu_loop_flag = 0;
 
             debug_cnt++;
-            if (debug_cnt % 100 == 0)
+            if (debug_cnt % 1 == 0)
             {
-                printf("P=%.1f,R=%.1f,Y=%.1f\r\n", att.pitch, att.roll, att.yaw_now);
+                printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
             }
         }
     }
