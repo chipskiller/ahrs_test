@@ -398,8 +398,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
  * @brief 夜间9轴融合解算（无大车干扰，地磁缓慢修正Yaw积分漂移）
  */
 void attitude_calc_9axis(void) {
-  attitude_calc_6axis(icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx,
-                      icm_raw.gy, icm_raw.gz, icm_raw.temp);
+  attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
+                      icm_raw.gy, icm_raw.gx, icm_raw.temp);
 
   // 磁力计修正：仅在夜间模式、静止且无地磁干扰时执行
   if (day_mode == 0 && mag_disturb_flag == 0) {
@@ -462,8 +462,8 @@ void save_install_zero_point(void) {
   // 连续采集5秒数据取平均，消除瞬时抖动
   for (uint16_t i = 0; i < 500; i++) {
     icm42670_get_raw_data();
-    attitude_calc_6axis(icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx,
-                        icm_raw.gy, icm_raw.gz, icm_raw.temp);
+    attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
+                        icm_raw.gy, icm_raw.gx, icm_raw.temp);
     yaw_sum += att.yaw_now;
     pit_sum += att.pitch;
     rol_sum += att.roll;
@@ -560,11 +560,11 @@ void imu_main_loop(uint8_t rtc_hour) {
   mag_disturb_detect();
 
   // 分时姿态解算
-  // if (day_mode == 1)
+//   if (day_mode == 1)
   attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
                       icm_raw.gy, icm_raw.gx, icm_raw.temp);
-  // else
-  //     attitude_calc_9axis();
+//   else
+    //   attitude_calc_9axis();
 
   // 计算当前角度相对安装零点的偏移量
   float yaw_offset = fabsf(att.yaw_now - att.yaw_base);
