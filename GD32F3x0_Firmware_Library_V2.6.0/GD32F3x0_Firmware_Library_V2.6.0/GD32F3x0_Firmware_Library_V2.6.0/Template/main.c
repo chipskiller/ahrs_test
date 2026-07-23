@@ -91,6 +91,12 @@ uint8_t receivesize = 32;
 __IO uint8_t txcount = 0;
 __IO uint16_t rxcount = 0;
 
+/************************ USART0 DMA + 空闲中断接收 ************************/
+#define USART0_RX_BUF_SIZE  256U
+uint8_t  usart0_rx_buffer[USART0_RX_BUF_SIZE];
+volatile uint16_t usart0_rx_len = 0;
+volatile uint8_t  usart0_rx_flag = 0;
+
 /************************ 底层I2C通用读写函数 ************************/
 void soft_i2c_init(void);
 void soft_i2c_start(void);
@@ -692,6 +698,44 @@ void com_usart_init(void) {
   usart_enable(USART0);
 }
 
+/************************ USART0 DMA + 空闲中断接收配置 ************************/
+/**
+ * @brief 配置USART0 DMA接收（循环模式）+ 空闲中断
+ * @note  printf用的USART0，RX用DMA_CH2，空闲中断触发后算长度
+ */
+void usart0_rx_dma_idle_init(void)
+{
+    dma_parameter_struct dma_para;
+
+    rcu_periph_clock_enable(RCU_DMA);
+
+    dma_deinit(DMA_CH2);
+    dma_struct_para_init(&dma_para);
+
+    dma_para.direction    = DMA_PERIPHERAL_TO_MEMORY;
+    dma_para.memory_addr  = (uint32_t)usart0_rx_buffer;
+    dma_para.memory_inc   = DMA_MEMORY_INCREASE_ENABLE;
+    dma_para.memory_width = DMA_MEMORY_WIDTH_8BIT;
+    dma_para.number       = USART0_RX_BUF_SIZE;
+    dma_para.periph_addr  = (uint32_t)&USART_RDATA(USART0);
+    dma_para.periph_inc   = DMA_PERIPH_INCREASE_DISABLE;
+    dma_para.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+    dma_para.priority     = DMA_PRIORITY_HIGH;
+    dma_init(DMA_CH2, &dma_para);
+
+    dma_circulation_enable(DMA_CH2);
+    dma_memory_to_memory_disable(DMA_CH2);
+
+    usart_flag_clear(USART0, USART_FLAG_IDLE);
+    usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
+
+    usart_dma_receive_config(USART0, USART_RECEIVE_DMA_ENABLE);
+    usart_interrupt_enable(USART0, USART_INT_IDLE);
+
+    dma_channel_enable(DMA_CH2);
+    nvic_irq_enable(USART0_IRQn, 1, 0);
+}
+
 void rcu_config(void) { rcu_periph_clock_enable(RCU_GPIOA); }
 
 void gpio_config(void) {
@@ -894,6 +938,7 @@ int main(void) {
   // i2c_test();
 
   imu_system_init();
+  usart0_rx_dma_idle_init();  /* 配置USART0 DMA接收 + 空闲中断 */
   timer_config();
   printf("timer init done!\n");
   static uint32_t debug_cnt = 0;
@@ -903,13 +948,20 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 10 == 0) {
+      if (debug_cnt % 100 == 0) {
         printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
         // printf("gx=%.4f,gy=%.4f,gz=%.4f\r\n", icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
+      }
+
+      /* USART0 DMA接收：收到数据就打印出来 */
+      if (usart0_rx_flag) {
+          usart0_rx_flag = 0;
+          usart0_rx_buffer[usart0_rx_len] = '\0';
+          printf("recv(%d): %s\r\n", usart0_rx_len, usart0_rx_buffer);
       }
     }
   }

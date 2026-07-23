@@ -35,6 +35,7 @@ OF SUCH DAMAGE.
 #include "gd32f3x0_it.h"
 #include "main.h"
 #include "systick.h"
+#include "gd32f3x0.h"
 
 extern uint8_t transfersize;
 extern uint8_t receivesize;
@@ -42,6 +43,12 @@ extern __IO uint8_t txcount;
 extern __IO uint16_t rxcount;
 extern uint8_t receiver_buffer[32];
 extern uint8_t transmitter_buffer[];
+
+/* USART0 DMA + 空闲中断接收 外部变量 */
+extern uint8_t  usart0_rx_buffer[];
+extern volatile uint16_t usart0_rx_len;
+extern volatile uint8_t  usart0_rx_flag;
+#define USART0_RX_BUF_SIZE  256U
 
 /*!
     \brief      this function handles NMI exception
@@ -167,28 +174,27 @@ void SysTick_Handler(void)
     delay_decrement();
 }
 
-// void USART0_IRQHandler(void)
-// {
-//     if (RESET != usart_interrupt_flag_get(USART0, USART_INT_FLAG_RBNE))
-//     {
-//         /* receive data */
-//         receiver_buffer[rxcount++] = usart_data_receive(USART0);
-//         if (rxcount == receivesize)
-//         {
-//             usart_interrupt_disable(USART0, USART_INT_RBNE);
-//         }
-//     }
+/*!
+    \brief      USART0 空闲中断（DMA接收完成一帧时触发）
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+void USART0_IRQHandler(void)
+{
+    if (RESET != usart_interrupt_flag_get(USART0, USART_INT_FLAG_IDLE)) {
+        /* 清除空闲中断标志 */
+        usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
 
-//     if (RESET != usart_interrupt_flag_get(USART0, USART_INT_FLAG_TBE))
-//     {
-//         /* transmit data */
-//         usart_data_transmit(USART0, transmitter_buffer[txcount++]);
-//         if (txcount == transfersize)
-//         {
-//             usart_interrupt_disable(USART0, USART_INT_TBE);
-//         }
-//     }
-// }
+        /* DMA计数器递减，计算本次接收长度 */
+        uint16_t remain = (uint16_t)dma_transfer_number_get(DMA_CH2);
+        uint16_t received = USART0_RX_BUF_SIZE - remain;
+        if (received <= USART0_RX_BUF_SIZE && received > 0) {
+            usart0_rx_len  = received;
+            usart0_rx_flag = 1;   /* 通知主循环处理 */
+        }
+    }
+}
 
 extern volatile uint8_t imu_loop_flag;
 
