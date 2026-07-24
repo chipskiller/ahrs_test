@@ -55,8 +55,17 @@ typedef struct {
   float yaw_base;   /*!< 安装基准旋转零点 */
 } attitude_info_t;
 
+/* 磁力计原始数据结构体 */
+typedef struct {
+  float mx;
+  float my;
+  float mz;
+  float mag_norm;
+} mag_raw_data_t;
+
 /* 全局变量声明（定义在 main.c） */
 extern attitude_info_t att;
+extern mag_raw_data_t mag_raw;
 extern uint8_t mag_disturb_flag;
 extern uint8_t fault_type;
 

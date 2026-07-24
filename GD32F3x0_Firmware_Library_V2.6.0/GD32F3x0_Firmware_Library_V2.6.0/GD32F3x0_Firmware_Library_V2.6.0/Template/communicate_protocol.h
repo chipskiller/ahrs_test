@@ -153,6 +153,53 @@ void alarm_status_read_send() {
   usart0_tx_dma_send(buf, idx);
 }
 
+/*读取地磁强度返回（使用 mag_raw.mag_norm）*/
+void mag_strength_read_send() {
+  uint16_t idx = 0;
+
+  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm);  // float 转 uint16
+
+  buf[idx++] = 0x55;       // head_
+  buf[idx++] = 0;          // len_ 暂填
+  buf[idx++] = 0x8A;       // cmd_ 读取地磁强度
+
+  buf[idx++] = 0x00;       // 读取参数
+  buf[idx++] = (uint8_t)(mag_val >> 8);   // 数据高位
+  buf[idx++] = (uint8_t)(mag_val & 0xFF); // 数据低位
+
+  // ---- 计算并填充帧长 & 校验码 ----
+  uint8_t frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+
+  uint8_t cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+
+  // ---- DMA 发送 ----
+  usart0_tx_dma_send(buf, idx);
+}
+
+/*收到主动上报信息回复*/
+void active_report_ack_send() {
+  uint16_t idx = 0;
+
+  buf[idx++] = 0x55;       // head_
+  buf[idx++] = 0;          // len_ 暂填
+  buf[idx++] = 0x8D;       // cmd_ 收到主动上报
+
+  buf[idx++] = 0x00;       // 参数
+  buf[idx++] = 0x00;       // 状态：成功
+
+  // ---- 计算并填充帧长 & 校验码 ----
+  uint8_t frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+
+  uint8_t cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+
+  // ---- DMA 发送 ----
+  usart0_tx_dma_send(buf, idx);
+}
+
 /*总发送分发函数*/
 void proto_send(uint8_t cmd) {
   if (usart0_tx_busy) {
@@ -172,6 +219,12 @@ void proto_send(uint8_t cmd) {
     break;
   case 0x87:
     alarm_status_read_send();
+    break;
+  case 0x8A:
+    mag_strength_read_send();
+    break;
+  case 0x8D:
+    active_report_ack_send();
     break;
   };
 }

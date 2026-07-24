@@ -43,13 +43,7 @@ typedef struct {
   float temp; // 芯片温度 ℃
 } icm_raw_data_t;
 
-// 磁力计原始数据
-typedef struct {
-  float mx;
-  float my;
-  float mz;
-  float mag_norm; // 地磁模长，用于判断干扰
-} mag_raw_data_t;
+// 磁力计原始数据（类型定义移到了 main.h）
 
 // 姿态结构体：实时角度 + 安装标定基准零点
 typedef struct {
@@ -80,7 +74,7 @@ quaternion_t quat;
 
 uint8_t day_mode = 1;                 // 1=白天6轴模式 0=夜间9轴融合
 uint8_t mag_disturb_flag = 0;         // 地磁受大车干扰标记
-uint8_t fault_type = 0;                 // 偏转报警类型标记
+uint8_t fault_type = 0;               // 偏转报警类型标记
 static uint16_t alarm_filter_cnt = 0; // 报警防抖计数器
 uint32_t stable_cnt;
 volatile uint8_t imu_loop_flag = 0; // 定时器中断标志
@@ -208,8 +202,50 @@ void icm42670_get_raw_data(void) {
 
 /************************ QMC5883P 磁力计驱动 ************************/
 void qmc5883p_init(void) {
-  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x09, 0x1D); // 连续采样、8倍增益、100Hz
-  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0A, 0x00);
+  uint8_t addrs[] = {0x3D, 0x2C, 0x1A, 0x1E};
+  uint8_t found = 0;
+
+  for (int i = 0; i < 4; i++) {
+    // 只发设备地址+W，检查 ACK，不发寄存器地址
+    soft_i2c_start();
+    uint8_t ack = soft_i2c_send_byte((addrs[i] << 1) | 0);
+    soft_i2c_stop();
+    if (ack == 0) {  // ACK received = 设备存在
+      // printf("QMC5883P: addr 0x%02X ACK!\n", addrs[i]);
+
+      // 读取完整寄存器空间，尝试识别芯片
+      // printf("  Reg dump:");
+      for (uint8_t reg = 0; reg <= 0x0D; reg++) {
+        uint8_t val = i2c_reg_read(I2C_MAG, addrs[i], reg);
+        // printf(" %02X", val);
+      }
+      // printf("\n");
+
+      // 尝试用单次模式触发一次测量
+      i2c_reg_write(I2C_MAG, addrs[i], 0x02, 0x01);  // 单次模式
+      delay_ms(10);
+      uint8_t d3[6];
+      i2c_reg_read_multi(I2C_MAG, addrs[i], 0x00, d3, 6);
+      // printf("  Single: %02X%02X %02X%02X %02X%02X",
+      //        d3[1], d3[0], d3[3], d3[2], d3[5], d3[4]);
+
+      i2c_reg_write(I2C_MAG, addrs[i], 0x02, 0x00);  // 切回连续
+      delay_ms(10);
+      uint8_t d4[6];
+      i2c_reg_read_multi(I2C_MAG, addrs[i], 0x00, d4, 6);
+      // printf(" Cont: %02X%02X %02X%02X %02X%02X\n",
+      //        d4[1], d4[0], d4[3], d4[2], d4[5], d4[4]);
+
+      // printf("  -> Chip at 0x%02X may need different init sequence\n", addrs[i]);
+
+      found = 1;
+      break;
+    }
+  }
+
+  if (!found) {
+    // printf("QMC5883P: no ACK at any address!\n");
+  }
 }
 
 /**
@@ -486,23 +522,24 @@ int save_install_zero_point(void) {
   att.roll_base = rol_sum / 500.0f;
   gyro_bias.temp_ref = icm_raw.temp;
 
-  // 三份数据在同页内，合并为一次擦写（避免后续 flash_write 擦除整页破坏前面数据）
+  // 三份数据在同页内，合并为一次擦写（避免后续 flash_write
+  // 擦除整页破坏前面数据）
   fmc_unlock();
   fmc_page_erase(FLASH_ZONE_A);
-  fmc_word_program(FLASH_ZONE_A,      ((uint32_t *)&att)[0]);
-  fmc_word_program(FLASH_ZONE_A + 4,  ((uint32_t *)&att)[1]);
-  fmc_word_program(FLASH_ZONE_A + 8,  ((uint32_t *)&att)[2]);
+  fmc_word_program(FLASH_ZONE_A, ((uint32_t *)&att)[0]);
+  fmc_word_program(FLASH_ZONE_A + 4, ((uint32_t *)&att)[1]);
+  fmc_word_program(FLASH_ZONE_A + 8, ((uint32_t *)&att)[2]);
   fmc_word_program(FLASH_ZONE_A + 12, ((uint32_t *)&att)[3]);
   fmc_word_program(FLASH_ZONE_A + 16, ((uint32_t *)&att)[4]);
   fmc_word_program(FLASH_ZONE_A + 20, ((uint32_t *)&att)[5]);
-  fmc_word_program(FLASH_ZONE_B,      ((uint32_t *)&att)[0]);
-  fmc_word_program(FLASH_ZONE_B + 4,  ((uint32_t *)&att)[1]);
-  fmc_word_program(FLASH_ZONE_B + 8,  ((uint32_t *)&att)[2]);
+  fmc_word_program(FLASH_ZONE_B, ((uint32_t *)&att)[0]);
+  fmc_word_program(FLASH_ZONE_B + 4, ((uint32_t *)&att)[1]);
+  fmc_word_program(FLASH_ZONE_B + 8, ((uint32_t *)&att)[2]);
   fmc_word_program(FLASH_ZONE_B + 12, ((uint32_t *)&att)[3]);
   fmc_word_program(FLASH_ZONE_B + 16, ((uint32_t *)&att)[4]);
   fmc_word_program(FLASH_ZONE_B + 20, ((uint32_t *)&att)[5]);
-  fmc_word_program(FLASH_GYRO_BIAS,    ((uint32_t *)&gyro_bias)[0]);
-  fmc_word_program(FLASH_GYRO_BIAS+4,  ((uint32_t *)&gyro_bias)[1]);
+  fmc_word_program(FLASH_GYRO_BIAS, ((uint32_t *)&gyro_bias)[0]);
+  fmc_word_program(FLASH_GYRO_BIAS + 4, ((uint32_t *)&gyro_bias)[1]);
   fmc_lock();
 
   attitude_info_t att_bak_a, att_bak_b;
@@ -542,7 +579,7 @@ void load_install_zero_point(void) {
     att.yaw_now = 0.0f;
     gyro_bias.gz_bias = 0.0f;
     gyro_bias.temp_ref = 25.0f;
-    printf("Flash data invalid, using default zero point!\n");
+    // printf("Flash data invalid, using default zero point!\n");
   }
 }
 
@@ -570,9 +607,9 @@ void send_alarm_info(uint8_t fault_type, float pit, float rol, float yaw) {
   alarm_print_cnt++;
   if (alarm_print_cnt >= 100) {
     char buf[64] = {0};
-    sprintf(buf, "FAULT:%d,P=%.1f,R=%.1f,Y=%.1f\r\n", fault_type, pit, rol,
-            yaw);
-    printf("%s", buf);
+    // sprintf(buf, "FAULT:%d,P=%.1f,R=%.1f,Y=%.1f\r\n", fault_type, pit, rol,
+    //         yaw);
+    // printf("%s", buf);
     alarm_print_cnt = 0;
   }
 }
@@ -629,7 +666,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   if (trigger_alarm == 1) {
     alarm_filter_cnt++;
     if (alarm_filter_cnt > ALARM_FILTER_CNT) {
-       fault_type = 0;
+      fault_type = 0;
       // X/Y轴倾斜故障标记
       if (pit_offset >= ANGLE_ALARM_THRESHOLD ||
           rol_offset >= ANGLE_ALARM_THRESHOLD)
@@ -855,20 +892,20 @@ void gpio_config(void) {
 void i2c_config(void) { soft_i2c_init(); }
 
 void i2c_test(void) {
-  printf("Soft I2C test with ACK detection...\n");
+  // printf("Soft I2C test with ACK detection...\n");
 
   soft_i2c_init();
 
   for (uint32_t j = 0; j < 5; j++) {
     soft_i2c_start();
     uint8_t ack = soft_i2c_send_byte(0xD0);
-    printf("Try %lu: Send addr 0xD0, ack=%u (%s)\n", j, ack,
-           ack == 0 ? "ACK received" : "NACK");
+    // printf("Try %lu: Send addr 0xD0, ack=%u (%s)\n", j, ack,
+    //        ack == 0 ? "ACK received" : "NACK");
     soft_i2c_stop();
     delay_ms(50);
   }
 
-  printf("Soft I2C test done!\n");
+  // printf("Soft I2C test done!\n");
 }
 
 #define SOFT_I2C_SCL_PIN GPIO_PIN_0
@@ -1011,7 +1048,7 @@ void timer_config(void) {
 int main(void) {
   systick_config();
   com_usart_init();
-  printf("Hellow word!\n");
+  // printf("Hellow word!\n");
   // sprintf(transmitter_buffer, "HELLO_world!\n");
   // usart_interrupt_enable(USART0, USART_INT_TBE);
   // delay_1ms(10);
@@ -1025,7 +1062,7 @@ int main(void) {
   gpio_config();
   /* configure I2C */
   i2c_config();
-  printf("I2C init done!\n");
+  // printf("I2C init done!\n");
 
   // i2c_test();
 
@@ -1039,7 +1076,7 @@ int main(void) {
   imu_system_init();
   usart0_rx_dma_idle_init(); /* 配置USART0 DMA接收 + 空闲中断 */
   timer_config();
-  printf("timer init done!\n");
+  // printf("timer init done!\n");
   static uint32_t debug_cnt = 0;
   while (1) {
     if (imu_loop_flag) {
@@ -1047,8 +1084,10 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 1000 == 0) {
-        printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
+      if (debug_cnt % 300 == 0) {
+        // printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
+        //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
+        // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
