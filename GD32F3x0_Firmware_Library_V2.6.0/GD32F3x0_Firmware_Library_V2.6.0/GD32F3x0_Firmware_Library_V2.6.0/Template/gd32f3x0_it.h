@@ -58,5 +58,6 @@ void PendSV_Handler(void);
 void SysTick_Handler(void);
 
 void USART0_IRQHandler(void);
+void DMA_Channel1_2_IRQHandler(void);
 
 #endif /* GD32F3X0_IT_H */

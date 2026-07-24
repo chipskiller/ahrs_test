@@ -1,8 +1,11 @@
+#include "main.h"
+#include "communicate_protocol.h"
 #include "gd32f3x0.h"
 #include "math.h"
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
+#include <stdint.h>
 
 #define delay_ms(x) delay_1ms(x)
 
@@ -53,14 +56,14 @@ typedef struct {
   float w, x, y, z;
 } quaternion_t;
 
-typedef struct {
-  float pitch;      // 实时俯仰角 X轴
-  float roll;       // 实时横滚角 Y轴
-  float yaw_now;    // 实时旋转角 Z轴(绕灯杆)
-  float pitch_base; // 安装基准俯仰零点
-  float roll_base;  // 安装基准横滚零点
-  float yaw_base;   // 安装基准旋转零点
-} attitude_info_t;
+// typedef struct {
+//   float pitch;      // 实时俯仰角 X轴
+//   float roll;       // 实时横滚角 Y轴
+//   float yaw_now;    // 实时旋转角 Z轴(绕灯杆)
+//   float pitch_base; // 安装基准俯仰零点
+//   float roll_base;  // 安装基准横滚零点
+//   float yaw_base;   // 安装基准旋转零点
+// } attitude_info_t;
 
 // 陀螺温度补偿零偏参数
 typedef struct {
@@ -92,10 +95,10 @@ __IO uint8_t txcount = 0;
 __IO uint16_t rxcount = 0;
 
 /************************ USART0 DMA + 空闲中断接收 ************************/
-#define USART0_RX_BUF_SIZE  256U
-uint8_t  usart0_rx_buffer[USART0_RX_BUF_SIZE];
+#define USART0_RX_BUF_SIZE 256U
+uint8_t usart0_rx_buffer[USART0_RX_BUF_SIZE];
 volatile uint16_t usart0_rx_len = 0;
-volatile uint8_t  usart0_rx_flag = 0;
+volatile uint8_t usart0_rx_flag = 0;
 
 /************************ 底层I2C通用读写函数 ************************/
 void soft_i2c_init(void);
@@ -566,11 +569,11 @@ void imu_main_loop(uint8_t rtc_hour) {
   mag_disturb_detect();
 
   // 分时姿态解算
-//   if (day_mode == 1)
+  //   if (day_mode == 1)
   attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
                       icm_raw.gy, icm_raw.gx, icm_raw.temp);
-//   else
-    //   attitude_calc_9axis();
+  //   else
+  //   attitude_calc_9axis();
 
   // 计算当前角度相对安装零点的偏移量
   float yaw_offset = fabsf(att.yaw_now - att.yaw_base);
@@ -698,42 +701,103 @@ void com_usart_init(void) {
   usart_enable(USART0);
 }
 
-/************************ USART0 DMA + 空闲中断接收配置 ************************/
+/************************ USART0 DMA + 空闲中断接收配置
+ * ************************/
 /**
  * @brief 配置USART0 DMA接收（循环模式）+ 空闲中断
  * @note  printf用的USART0，RX用DMA_CH2，空闲中断触发后算长度
  */
-void usart0_rx_dma_idle_init(void)
-{
-    dma_parameter_struct dma_para;
+void usart0_rx_dma_idle_init(void) {
+  dma_parameter_struct dma_para;
 
-    rcu_periph_clock_enable(RCU_DMA);
+  rcu_periph_clock_enable(RCU_DMA);
 
-    dma_deinit(DMA_CH2);
-    dma_struct_para_init(&dma_para);
+  dma_deinit(DMA_CH2);
+  dma_struct_para_init(&dma_para);
 
-    dma_para.direction    = DMA_PERIPHERAL_TO_MEMORY;
-    dma_para.memory_addr  = (uint32_t)usart0_rx_buffer;
-    dma_para.memory_inc   = DMA_MEMORY_INCREASE_ENABLE;
-    dma_para.memory_width = DMA_MEMORY_WIDTH_8BIT;
-    dma_para.number       = USART0_RX_BUF_SIZE;
-    dma_para.periph_addr  = (uint32_t)&USART_RDATA(USART0);
-    dma_para.periph_inc   = DMA_PERIPH_INCREASE_DISABLE;
-    dma_para.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
-    dma_para.priority     = DMA_PRIORITY_HIGH;
-    dma_init(DMA_CH2, &dma_para);
+  dma_para.direction = DMA_PERIPHERAL_TO_MEMORY;
+  dma_para.memory_addr = (uint32_t)usart0_rx_buffer;
+  dma_para.memory_inc = DMA_MEMORY_INCREASE_ENABLE;
+  dma_para.memory_width = DMA_MEMORY_WIDTH_8BIT;
+  dma_para.number = USART0_RX_BUF_SIZE;
+  dma_para.periph_addr = (uint32_t)&USART_RDATA(USART0);
+  dma_para.periph_inc = DMA_PERIPH_INCREASE_DISABLE;
+  dma_para.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+  dma_para.priority = DMA_PRIORITY_HIGH;
+  dma_init(DMA_CH2, &dma_para);
 
-    dma_circulation_enable(DMA_CH2);
-    dma_memory_to_memory_disable(DMA_CH2);
+  dma_circulation_disable(DMA_CH2); /* 单次模式，每帧重新配置 */
+  dma_memory_to_memory_disable(DMA_CH2);
 
-    usart_flag_clear(USART0, USART_FLAG_IDLE);
-    usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
+  usart_flag_clear(USART0, USART_FLAG_IDLE);
+  usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
 
-    usart_dma_receive_config(USART0, USART_RECEIVE_DMA_ENABLE);
-    usart_interrupt_enable(USART0, USART_INT_IDLE);
+  usart_dma_receive_config(USART0, USART_RECEIVE_DMA_ENABLE);
+  usart_interrupt_enable(USART0, USART_INT_IDLE);
 
-    dma_channel_enable(DMA_CH2);
-    nvic_irq_enable(USART0_IRQn, 1, 0);
+  dma_channel_enable(DMA_CH2);
+  nvic_irq_enable(USART0_IRQn, 1, 0);
+}
+
+/************************ USART0 DMA 发送 ************************/
+volatile uint8_t usart0_tx_busy = 0;
+
+/**
+ * @brief USART0 DMA发送（USART0_TX = DMA_CH1）
+ * @param buf: 待发送数据
+ * @param len: 长度
+ * @note  单次发送，非循环。发送期间 usart0_tx_busy = 1
+ */
+void usart0_tx_dma_send(uint8_t *buf, uint16_t len) {
+  dma_parameter_struct dma_para;
+
+  while (usart0_tx_busy)
+    ; /* 等上一次发完 */
+
+  rcu_periph_clock_enable(RCU_DMA);
+
+  dma_deinit(DMA_CH1);
+  dma_struct_para_init(&dma_para);
+
+  dma_para.direction = DMA_MEMORY_TO_PERIPHERAL;
+  dma_para.memory_addr = (uint32_t)buf;
+  dma_para.memory_inc = DMA_MEMORY_INCREASE_ENABLE;
+  dma_para.memory_width = DMA_MEMORY_WIDTH_8BIT;
+  dma_para.number = len;
+  dma_para.periph_addr = (uint32_t)&USART_TDATA(USART0);
+  dma_para.periph_inc = DMA_PERIPH_INCREASE_DISABLE;
+  dma_para.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+  dma_para.priority = DMA_PRIORITY_HIGH;
+  dma_init(DMA_CH1, &dma_para);
+
+  dma_circulation_disable(DMA_CH1);
+  dma_memory_to_memory_disable(DMA_CH1);
+
+  usart0_tx_busy = 1;
+
+  /* 使能 DMA 传输完成中断，用于清除 busy 标志 */
+  dma_interrupt_enable(DMA_CH1, DMA_INT_FTF);
+  nvic_irq_enable(DMA_Channel1_2_IRQn, 0, 1);
+
+  usart_dma_transmit_config(USART0, USART_TRANSMIT_DMA_ENABLE);
+  dma_channel_enable(DMA_CH1);
+}
+
+/**
+ * @brief DMA 发送完成中断（DMA_CH1 与 DMA_CH2 共用）
+ * 清除 usart0_tx_busy，允许下一帧发送
+ */
+void DMA_Channel1_2_IRQHandler(void) {
+  if (dma_interrupt_flag_get(DMA_CH1, DMA_INT_FLAG_FTF) == SET) {
+    dma_interrupt_flag_clear(DMA_CH1, DMA_INT_FLAG_FTF);
+    dma_channel_disable(DMA_CH1);
+    usart_dma_transmit_config(USART0, USART_TRANSMIT_DMA_DISABLE);
+    usart0_tx_busy = 0;
+  }
+
+  if (dma_interrupt_flag_get(DMA_CH2, DMA_INT_FLAG_FTF) == SET) {
+    dma_interrupt_flag_clear(DMA_CH2, DMA_INT_FLAG_FTF);
+  }
 }
 
 void rcu_config(void) { rcu_periph_clock_enable(RCU_GPIOA); }
@@ -938,7 +1002,7 @@ int main(void) {
   // i2c_test();
 
   imu_system_init();
-  usart0_rx_dma_idle_init();  /* 配置USART0 DMA接收 + 空闲中断 */
+  usart0_rx_dma_idle_init(); /* 配置USART0 DMA接收 + 空闲中断 */
   timer_config();
   printf("timer init done!\n");
   static uint32_t debug_cnt = 0;
@@ -948,7 +1012,7 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 100 == 0) {
+      if (debug_cnt % 1000 == 0) {
         printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
@@ -956,16 +1020,20 @@ int main(void) {
         // printf("gx=%.4f,gy=%.4f,gz=%.4f\r\n", icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
       }
-
-      /* USART0 DMA接收：收到数据就打印出来 */
-      if (usart0_rx_flag) {
-          usart0_rx_flag = 0;
-          usart0_rx_buffer[usart0_rx_len] = '\0';
-          printf("recv(%d): %s\r\n", usart0_rx_len, usart0_rx_buffer);
+    }
+    // 处理串口数据（空闲中断已计算 usart0_rx_len）
+    if (usart0_rx_flag) {
+      usart0_rx_flag = 0;
+      if (usart0_rx_len >= 3) {
+        uint8_t calc_cs = calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
+        if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
+          /* 校验失败，丢弃此帧 */
+        } else {
+          proto_send(usart0_rx_buffer[2]);
+        }
       }
     }
   }
-  return 0;
 }
 
 // #include "gd32f3x0.h"

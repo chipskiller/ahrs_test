@@ -48,6 +48,7 @@ extern uint8_t transmitter_buffer[];
 extern uint8_t  usart0_rx_buffer[];
 extern volatile uint16_t usart0_rx_len;
 extern volatile uint8_t  usart0_rx_flag;
+extern volatile uint8_t  usart0_tx_busy;
 #define USART0_RX_BUF_SIZE  256U
 
 /*!
@@ -186,12 +187,18 @@ void USART0_IRQHandler(void)
         /* 清除空闲中断标志 */
         usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
 
-        /* DMA计数器递减，计算本次接收长度 */
+        /* DMA 单次模式：计数器剩余值即本次接收长度 */
         uint16_t remain = (uint16_t)dma_transfer_number_get(DMA_CH2);
         uint16_t received = USART0_RX_BUF_SIZE - remain;
-        if (received <= USART0_RX_BUF_SIZE && received > 0) {
+
+        if (received > 0 && received <= USART0_RX_BUF_SIZE) {
             usart0_rx_len  = received;
-            usart0_rx_flag = 1;   /* 通知主循环处理 */
+            usart0_rx_flag = 1;
+
+            /* 数据在 buffer[0..received-1]，重新配置 DMA 准备下一帧 */
+            dma_channel_disable(DMA_CH2);
+            dma_transfer_number_config(DMA_CH2, USART0_RX_BUF_SIZE);
+            dma_channel_enable(DMA_CH2);
         }
     }
 }

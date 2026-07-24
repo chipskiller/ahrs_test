@@ -43,6 +43,22 @@ OF SUCH DAMAGE.
 #ifndef MAIN_H
 #define MAIN_H
 
+#include <stdint.h>
+
+/* 姿态信息结构体 */
+typedef struct {
+  float pitch;      /*!< 实时俯仰角 X轴 */
+  float roll;       /*!< 实时横滚角 Y轴 */
+  float yaw_now;    /*!< 实时旋转角 Z轴 */
+  float pitch_base; /*!< 安装基准俯仰零点 */
+  float roll_base;  /*!< 安装基准横滚零点 */
+  float yaw_base;   /*!< 安装基准旋转零点 */
+} attitude_info_t;
+
+/* 全局变量声明（定义在 main.c） */
+extern attitude_info_t att;
+extern uint8_t mag_disturb_flag;
+
 void imu_main_loop(uint8_t rtc_hour);
 
 #endif /* MAIN_H */
