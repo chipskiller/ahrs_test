@@ -58,6 +58,7 @@ typedef struct {
 /* 全局变量声明（定义在 main.c） */
 extern attitude_info_t att;
 extern uint8_t mag_disturb_flag;
+extern uint8_t fault_type;
 
 void imu_main_loop(uint8_t rtc_hour);
 int save_install_zero_point(void);

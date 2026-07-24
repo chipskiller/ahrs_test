@@ -80,6 +80,7 @@ quaternion_t quat;
 
 uint8_t day_mode = 1;                 // 1=白天6轴模式 0=夜间9轴融合
 uint8_t mag_disturb_flag = 0;         // 地磁受大车干扰标记
+uint8_t fault_type = 0;                 // 偏转报警类型标记
 static uint16_t alarm_filter_cnt = 0; // 报警防抖计数器
 uint32_t stable_cnt;
 volatile uint8_t imu_loop_flag = 0; // 定时器中断标志
@@ -628,14 +629,14 @@ void imu_main_loop(uint8_t rtc_hour) {
   if (trigger_alarm == 1) {
     alarm_filter_cnt++;
     if (alarm_filter_cnt > ALARM_FILTER_CNT) {
-      uint8_t fault_type = 0;
+       fault_type = 0;
       // X/Y轴倾斜故障标记
       if (pit_offset >= ANGLE_ALARM_THRESHOLD ||
           rol_offset >= ANGLE_ALARM_THRESHOLD)
-        fault_type |= 0x01;
+        fault_type = 0x01;
       // Z轴绕灯杆旋转故障标记
       if (yaw_offset >= ANGLE_ALARM_THRESHOLD)
-        fault_type |= 0x02;
+        fault_type = 0x02;
       // send_alarm_info(fault_type, att.pitch, att.roll, att.yaw_now);
       alarm_filter_cnt = ALARM_FILTER_CNT;
     }
