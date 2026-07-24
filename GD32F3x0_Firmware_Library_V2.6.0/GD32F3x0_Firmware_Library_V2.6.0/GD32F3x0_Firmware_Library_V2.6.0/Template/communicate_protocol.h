@@ -206,41 +206,5 @@ void proto_send(uint8_t cmd) {
   if (usart0_tx_busy) {
     return;
   }
-
-  // 轮询发送：每次调用发送一种数据（共6种循环）
-  static uint8_t idx = 0;
-  switch (idx) {
-  case 0:
-    angle_send(att.pitch, att.roll, att.yaw_now, mag_disturb_flag);
-    break;
-  case 1:
-    alarm_status_read_send();
-    break;
-  case 2:
-    mag_strength_read_send();
-    break;
-  case 3: {
-    // 角度编码/解码双向验证（用实时值）
-    float vals[3] = {att.roll, att.pitch, att.yaw_now};
-    char *names[3] = {"Roll", "Pitch", "Yaw"};
-    printf("Verify:\r\n");
-    for (int i = 0; i < 3; i++) {
-      float orig = vals[i];
-      uint16_t enc = (uint16_t)(fabsf(orig) * 100);
-      uint8_t sign = (orig < 0) ? 0x80 : 0x00;
-      uint8_t hi = (uint8_t)(enc >> 8);
-      uint8_t lo = (uint8_t)(enc & 0xFF);
-      float dec = (sign ? -1.0f : 1.0f) * (float)enc / 100.0f;
-      printf("  %s: %.4f -> %02X %02X %02X -> %.4f\r\n",
-             names[i], orig, sign, hi, lo, dec);
-    }
-    break;
-  }
-  case 4:
-    active_report_ack_send();
-    break;
-  }
-  idx++;
-  if (idx >= 5)
-    idx = 0;
+  angle_send(att.pitch, att.roll, att.yaw_now, mag_disturb_flag);
 }

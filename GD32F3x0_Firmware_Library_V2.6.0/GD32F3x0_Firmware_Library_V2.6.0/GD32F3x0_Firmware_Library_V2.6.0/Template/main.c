@@ -767,7 +767,7 @@ void com_usart_init(void) {
   usart_word_length_set(USART0, USART_WL_8BIT);
   usart_stop_bit_set(USART0, USART_STB_1BIT);
   usart_parity_config(USART0, USART_PM_NONE);
-  usart_baudrate_set(USART0, 115200U);
+  usart_baudrate_set(USART0, 9600U);
   usart_receive_config(USART0, USART_RECEIVE_ENABLE);
   usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
   usart_enable(USART0);
@@ -1099,7 +1099,7 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 100 == 0) {
+      if (debug_cnt % 1000 == 0) {
         proto_send(usart0_rx_buffer[2]);
         // printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
