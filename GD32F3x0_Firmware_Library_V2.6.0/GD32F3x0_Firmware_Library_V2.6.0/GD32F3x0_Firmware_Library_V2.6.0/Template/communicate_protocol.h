@@ -95,6 +95,42 @@ void set_zero_angle() {
   usart0_tx_dma_send(buf, idx);
 }
 
+/*零位角度读取返回（返回安装基准零点 pitch_base/roll_base/yaw_base）*/
+void zero_angle_read_send() {
+  uint16_t idx = 0;
+
+  buf[idx++] = 0x55;       // head_
+  buf[idx++] = 0;          // len_ 暂填
+  buf[idx++] = 0x84;       // cmd_ 零位角度读取
+
+  buf[idx++] = 0x00;       // 读取参数
+
+  // Roll (att.roll_base)
+  buf[idx++] = (att.roll_base < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.roll_base) * 100) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.roll_base) * 100) & 0xFF);
+
+  // Pitch (att.pitch_base)
+  buf[idx++] = (att.pitch_base < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.pitch_base) * 100) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.pitch_base) * 100) & 0xFF);
+
+  // Yaw (att.yaw_base)
+  buf[idx++] = (att.yaw_base < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.yaw_base) * 100) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.yaw_base) * 100) & 0xFF);
+
+  // ---- 计算并填充帧长 & 校验码 ----
+  uint8_t frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+
+  uint8_t cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+
+  // ---- DMA 发送 ----
+  usart0_tx_dma_send(buf, idx);
+}
+
 /*总发送分发函数*/
 void proto_send(uint8_t cmd) {
   if (usart0_tx_busy) {
@@ -108,6 +144,9 @@ void proto_send(uint8_t cmd) {
     break;
   case 0x83:
     set_zero_angle();
+    break;
+  case 0x84:
+    zero_angle_read_send();
     break;
   };
 }
