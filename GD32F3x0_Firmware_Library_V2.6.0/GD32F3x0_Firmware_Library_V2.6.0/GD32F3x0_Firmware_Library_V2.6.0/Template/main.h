@@ -60,5 +60,6 @@ extern attitude_info_t att;
 extern uint8_t mag_disturb_flag;
 
 void imu_main_loop(uint8_t rtc_hour);
+int save_install_zero_point(void);
 
 #endif /* MAIN_H */

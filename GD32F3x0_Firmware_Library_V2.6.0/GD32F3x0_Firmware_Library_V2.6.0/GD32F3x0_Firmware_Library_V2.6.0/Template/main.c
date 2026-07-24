@@ -465,8 +465,9 @@ void flash_write(uint32_t addr, void *data, uint16_t len) {
 /**
  * @brief 现场安装标定函数，采集500帧取平均保存基准零点
  * 设备安装调平后调用一次，断电永久保存
+ * @note fmc_page_erase()会擦除整页，若后续Flash写入其他数据需注意分区规划
  */
-void save_install_zero_point(void) {
+int save_install_zero_point(void) {
   float yaw_sum = 0.0f, pit_sum = 0.0f, rol_sum = 0.0f;
   // 连续采集5秒数据取平均，消除瞬时抖动
   for (uint16_t i = 0; i < 500; i++) {
@@ -484,10 +485,43 @@ void save_install_zero_point(void) {
   att.roll_base = rol_sum / 500.0f;
   gyro_bias.temp_ref = icm_raw.temp;
 
-  // 双分区备份，防止存储损坏丢失零点
-  flash_write(FLASH_ZONE_A, &att, sizeof(attitude_info_t));
-  flash_write(FLASH_ZONE_B, &att, sizeof(attitude_info_t));
-  flash_write(FLASH_GYRO_BIAS, &gyro_bias, sizeof(gyro_bias_t));
+  // 三份数据在同页内，合并为一次擦写（避免后续 flash_write 擦除整页破坏前面数据）
+  fmc_unlock();
+  fmc_page_erase(FLASH_ZONE_A);
+  fmc_word_program(FLASH_ZONE_A,      ((uint32_t *)&att)[0]);
+  fmc_word_program(FLASH_ZONE_A + 4,  ((uint32_t *)&att)[1]);
+  fmc_word_program(FLASH_ZONE_A + 8,  ((uint32_t *)&att)[2]);
+  fmc_word_program(FLASH_ZONE_A + 12, ((uint32_t *)&att)[3]);
+  fmc_word_program(FLASH_ZONE_A + 16, ((uint32_t *)&att)[4]);
+  fmc_word_program(FLASH_ZONE_A + 20, ((uint32_t *)&att)[5]);
+  fmc_word_program(FLASH_ZONE_B,      ((uint32_t *)&att)[0]);
+  fmc_word_program(FLASH_ZONE_B + 4,  ((uint32_t *)&att)[1]);
+  fmc_word_program(FLASH_ZONE_B + 8,  ((uint32_t *)&att)[2]);
+  fmc_word_program(FLASH_ZONE_B + 12, ((uint32_t *)&att)[3]);
+  fmc_word_program(FLASH_ZONE_B + 16, ((uint32_t *)&att)[4]);
+  fmc_word_program(FLASH_ZONE_B + 20, ((uint32_t *)&att)[5]);
+  fmc_word_program(FLASH_GYRO_BIAS,    ((uint32_t *)&gyro_bias)[0]);
+  fmc_word_program(FLASH_GYRO_BIAS+4,  ((uint32_t *)&gyro_bias)[1]);
+  fmc_lock();
+
+  attitude_info_t att_bak_a, att_bak_b;
+  gyro_bias_t gyro_bias_bak;
+  flash_read(FLASH_ZONE_A, &att_bak_a, sizeof(attitude_info_t));
+  flash_read(FLASH_ZONE_B, &att_bak_b, sizeof(attitude_info_t));
+  flash_read(FLASH_GYRO_BIAS, &gyro_bias_bak, sizeof(gyro_bias_t));
+  // 检查写入是否成功
+  if (att_bak_a.yaw_base != att.yaw_base ||
+      att_bak_b.yaw_base != att.yaw_base ||
+      att_bak_a.pitch_base != att.pitch_base ||
+      att_bak_b.pitch_base != att.pitch_base ||
+      att_bak_a.roll_base != att.roll_base ||
+      att_bak_b.roll_base != att.roll_base ||
+      gyro_bias_bak.gz_bias != gyro_bias.gz_bias ||
+      gyro_bias_bak.temp_ref != gyro_bias.temp_ref) {
+    return -1;
+  } else {
+    return 1;
+  }
 }
 
 /**
@@ -1025,7 +1059,8 @@ int main(void) {
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
       if (usart0_rx_len >= 3) {
-        uint8_t calc_cs = calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
+        uint8_t calc_cs =
+            calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
         if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
           /* 校验失败，丢弃此帧 */
         } else {

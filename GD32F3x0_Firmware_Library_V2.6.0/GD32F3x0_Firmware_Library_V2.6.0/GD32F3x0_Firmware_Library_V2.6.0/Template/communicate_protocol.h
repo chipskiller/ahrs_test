@@ -13,18 +13,14 @@
 #define PACKED
 #endif
 
-/* 外部函数声明 */
+/* 外部声明 */
 extern void usart0_tx_dma_send(uint8_t *buf, uint16_t len);
 extern volatile uint8_t usart0_tx_busy;
 
-/* 协议通用定义 */
+/* 缓冲区 */
+static uint8_t buf[256];
 
-// typedef PACKED struct {
-//   uint8_t head_; // 帧头 0xAA/0x55
-//   uint8_t len_;  // 从本字节到 checksum 的长度
-//   uint8_t cmd_;  // 功能码
-// } proto_head_t;
-
+/*校验*/
 uint8_t calc_checksum(const uint8_t *data, uint16_t len) {
   uint8_t xor_val = 0;
   for (uint16_t i = 0; i < len; i++) {
@@ -34,29 +30,7 @@ uint8_t calc_checksum(const uint8_t *data, uint16_t len) {
 }
 
 /*角度读取*/
-
-// typedef PACKED struct {
-//   uint8_t pram_;
-//   uint8_t check_;
-// } angleget_frame_t;
-
-// typedef PACKED struct {
-//   uint8_t pram_;
-//   uint8_t roll_sign_;
-//   uint8_t roll_data_high_;
-//   uint8_t roll_data_low_;
-//   uint8_t pitch_sign_;
-//   uint8_t pitch_data_high_;
-//   uint8_t pitch_data_low_;
-//   uint8_t yaw_sign_;
-//   uint8_t yaw_data_high_;
-//   uint8_t yaw_data_low_;
-//   uint8_t if_mag_disturb_;
-//   uint8_t check_;
-// } anglesend_frame_t;
-
 void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
-  static uint8_t buf[14]; // 连续缓冲区（static 防止 DMA 非阻塞发送时栈回收）
   uint16_t idx = 0;
 
   // ---- 填充头部 ----
@@ -94,6 +68,34 @@ void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
   usart0_tx_dma_send(buf, idx);
 }
 
+/*零位设置状态返回（协议格式同 angle_send）*/
+void set_zero_angle() {
+  uint16_t idx = 0;
+
+  buf[idx++] = 0x55;       // head_
+  buf[idx++] = 0;          // len_ 暂填
+  buf[idx++] = 0x83;       // cmd_ 零位设置
+
+  buf[idx++] = 0x00;       // 零位设置参数
+
+  if (save_install_zero_point() == 1) {
+    buf[idx++] = 0x00;     // 成功
+  } else {
+    buf[idx++] = 0x01;     // 失败
+  }
+
+  // ---- 计算并填充帧长 & 校验码 ----
+  uint8_t frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+
+  uint8_t cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+
+  // ---- DMA 发送 ----
+  usart0_tx_dma_send(buf, idx);
+}
+
+/*总发送分发函数*/
 void proto_send(uint8_t cmd) {
   if (usart0_tx_busy) {
     return; // 上一次发送未完成，直接返回
@@ -103,8 +105,9 @@ void proto_send(uint8_t cmd) {
     break;
   case 0x82:
     angle_send(att.pitch, att.roll, att.yaw_now, mag_disturb_flag);
-    // printf("\r\nsend angle: P=%.2f,R=%.2f,Y=%.2f,mag_disturb=%d\r\n", att.pitch,
-    //        att.roll, att.yaw_now, mag_disturb_flag);
+    break;
+  case 0x83:
+    set_zero_angle();
     break;
   };
 }
