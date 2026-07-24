@@ -809,6 +809,20 @@ void usart0_rx_dma_idle_init(void) {
 
   dma_channel_enable(DMA_CH2);
   nvic_irq_enable(USART0_IRQn, 1, 0);
+
+  /* 清除开机时 USART 可能已收到的脏数据 */
+  delay_1ms(5);                         // 等 USART 线稳定
+  volatile uint8_t dummy;
+  for (int i = 0; i < 16; i++) {
+    dummy = USART_RDATA(USART0);        // 读走残留字节
+  }
+  (void)dummy;
+  usart_flag_clear(USART0, USART_FLAG_IDLE);
+  usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
+  memset(usart0_rx_buffer, 0, USART0_RX_BUF_SIZE);  // 清空 DMA 缓冲区
+  usart0_rx_len = 0;
+  usart0_rx_flag = 0;
+  dma_transfer_number_config(DMA_CH2, USART0_RX_BUF_SIZE);  // 复位 DMA 计数器
 }
 
 /************************ USART0 DMA 发送 ************************/
