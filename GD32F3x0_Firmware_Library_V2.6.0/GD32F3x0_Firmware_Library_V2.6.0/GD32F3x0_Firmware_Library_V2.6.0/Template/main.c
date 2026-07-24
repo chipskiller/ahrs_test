@@ -1091,6 +1091,7 @@ int main(void) {
   usart0_rx_dma_idle_init(); /* 配置USART0 DMA接收 + 空闲中断 */
   timer_config();
   // printf("timer init done!\n");
+
   static uint32_t debug_cnt = 0;
   while (1) {
     if (imu_loop_flag) {
@@ -1098,7 +1099,8 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 300 == 0) {
+      if (debug_cnt % 100 == 0) {
+        proto_send(usart0_rx_buffer[2]);
         // printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
         // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
@@ -1112,15 +1114,15 @@ int main(void) {
     // 处理串口数据（空闲中断已计算 usart0_rx_len）
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
-      if (usart0_rx_len >= 3) {
-        uint8_t calc_cs =
-            calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
-        if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
-          /* 校验失败，丢弃此帧 */
-        } else {
-          proto_send(usart0_rx_buffer[2]);
-        }
-      }
+      // if (usart0_rx_len >= 3) {
+      //   uint8_t calc_cs =
+      //       calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
+      //   if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
+      //     /* 校验失败，丢弃此帧 */
+      //   } else {
+      //     // proto_send(usart0_rx_buffer[2]);
+      //   }
+      // }
     }
   }
 }

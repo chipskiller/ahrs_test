@@ -2,6 +2,7 @@
 #include "main.h"
 #include "stdint.h"
 #include <math.h>
+#include <stdio.h>
 
 #ifdef __CC_ARM
 #define PACKED __packed
@@ -72,16 +73,16 @@ void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
 void set_zero_angle() {
   uint16_t idx = 0;
 
-  buf[idx++] = 0x55;       // head_
-  buf[idx++] = 0;          // len_ 暂填
-  buf[idx++] = 0x83;       // cmd_ 零位设置
+  buf[idx++] = 0x55; // head_
+  buf[idx++] = 0;    // len_ 暂填
+  buf[idx++] = 0x83; // cmd_ 零位设置
 
-  buf[idx++] = 0x00;       // 零位设置参数
+  buf[idx++] = 0x00; // 零位设置参数
 
   if (save_install_zero_point() == 1) {
-    buf[idx++] = 0x00;     // 成功
+    buf[idx++] = 0x00; // 成功
   } else {
-    buf[idx++] = 0x01;     // 失败
+    buf[idx++] = 0x01; // 失败
   }
 
   // ---- 计算并填充帧长 & 校验码 ----
@@ -99,11 +100,11 @@ void set_zero_angle() {
 void zero_angle_read_send() {
   uint16_t idx = 0;
 
-  buf[idx++] = 0x55;       // head_
-  buf[idx++] = 0;          // len_ 暂填
-  buf[idx++] = 0x84;       // cmd_ 零位角度读取
+  buf[idx++] = 0x55; // head_
+  buf[idx++] = 0;    // len_ 暂填
+  buf[idx++] = 0x84; // cmd_ 零位角度读取
 
-  buf[idx++] = 0x00;       // 读取参数
+  buf[idx++] = 0x00; // 读取参数
 
   // Roll (att.roll_base)
   buf[idx++] = (att.roll_base < 0) ? 0x80 : 0x00;
@@ -135,12 +136,12 @@ void zero_angle_read_send() {
 void alarm_status_read_send() {
   uint16_t idx = 0;
 
-  buf[idx++] = 0x55;       // head_
-  buf[idx++] = 0;          // len_ 暂填
-  buf[idx++] = 0x87;       // cmd_ 偏转报警状态读取
+  buf[idx++] = 0x55; // head_
+  buf[idx++] = 0;    // len_ 暂填
+  buf[idx++] = 0x87; // cmd_ 偏转报警状态读取
 
   buf[idx++] = 0x00;       // 读取参数
-  buf[idx++] = fault_type;     // 状态
+  buf[idx++] = fault_type; // 状态
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
@@ -157,13 +158,13 @@ void alarm_status_read_send() {
 void mag_strength_read_send() {
   uint16_t idx = 0;
 
-  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm);  // float 转 uint16
+  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm); // float 转 uint16
 
-  buf[idx++] = 0x55;       // head_
-  buf[idx++] = 0;          // len_ 暂填
-  buf[idx++] = 0x8A;       // cmd_ 读取地磁强度
+  buf[idx++] = 0x55; // head_
+  buf[idx++] = 0;    // len_ 暂填
+  buf[idx++] = 0x8A; // cmd_ 读取地磁强度
 
-  buf[idx++] = 0x00;       // 读取参数
+  buf[idx++] = 0x00;                      // 读取参数
   buf[idx++] = (uint8_t)(mag_val >> 8);   // 数据高位
   buf[idx++] = (uint8_t)(mag_val & 0xFF); // 数据低位
 
@@ -182,12 +183,12 @@ void mag_strength_read_send() {
 void active_report_ack_send() {
   uint16_t idx = 0;
 
-  buf[idx++] = 0x55;       // head_
-  buf[idx++] = 0;          // len_ 暂填
-  buf[idx++] = 0x8D;       // cmd_ 收到主动上报
+  buf[idx++] = 0x55; // head_
+  buf[idx++] = 0;    // len_ 暂填
+  buf[idx++] = 0x8D; // cmd_ 收到主动上报
 
-  buf[idx++] = 0x00;       // 参数
-  buf[idx++] = 0x00;       // 状态：成功
+  buf[idx++] = 0x00; // 参数
+  buf[idx++] = 0x00; // 状态：成功
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
@@ -200,31 +201,46 @@ void active_report_ack_send() {
   usart0_tx_dma_send(buf, idx);
 }
 
-/*总发送分发函数*/
+/*自动上报（轮询发送所有数据，非阻塞降频）*/
 void proto_send(uint8_t cmd) {
   if (usart0_tx_busy) {
-    return; // 上一次发送未完成，直接返回
+    return;
   }
-  switch (cmd) {
-  default:
-    break;
-  case 0x82:
+
+  // 轮询发送：每次调用发送一种数据（共6种循环）
+  static uint8_t idx = 0;
+  switch (idx) {
+  case 0:
     angle_send(att.pitch, att.roll, att.yaw_now, mag_disturb_flag);
     break;
-  case 0x83:
-    set_zero_angle();
-    break;
-  case 0x84:
-    zero_angle_read_send();
-    break;
-  case 0x87:
+  case 1:
     alarm_status_read_send();
     break;
-  case 0x8A:
+  case 2:
     mag_strength_read_send();
     break;
-  case 0x8D:
+  case 3: {
+    // 角度编码/解码双向验证（用实时值）
+    float vals[3] = {att.roll, att.pitch, att.yaw_now};
+    char *names[3] = {"Roll", "Pitch", "Yaw"};
+    printf("Verify:\r\n");
+    for (int i = 0; i < 3; i++) {
+      float orig = vals[i];
+      uint16_t enc = (uint16_t)(fabsf(orig) * 100);
+      uint8_t sign = (orig < 0) ? 0x80 : 0x00;
+      uint8_t hi = (uint8_t)(enc >> 8);
+      uint8_t lo = (uint8_t)(enc & 0xFF);
+      float dec = (sign ? -1.0f : 1.0f) * (float)enc / 100.0f;
+      printf("  %s: %.4f -> %02X %02X %02X -> %.4f\r\n",
+             names[i], orig, sign, hi, lo, dec);
+    }
+    break;
+  }
+  case 4:
     active_report_ack_send();
     break;
-  };
+  }
+  idx++;
+  if (idx >= 5)
+    idx = 0;
 }
