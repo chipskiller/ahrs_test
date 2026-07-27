@@ -114,67 +114,29 @@ void icm42670_get_raw_data(void) {
   icm_raw.temp = temp_raw / 132.48f + 25.0f;
 }
 
-/************************ QMC5883P 磁力计驱动 ************************/
+/************************ 磁力计驱动 ************************/
 void qmc5883p_init(void) {
-  uint8_t addrs[] = {0x3D, 0x2C, 0x1A, 0x1E};
-  uint8_t found = 0;
-
-  for (int i = 0; i < 4; i++) {
-    // 只发设备地址+W，检查 ACK，不发寄存器地址
-    soft_i2c_start();
-    uint8_t ack = soft_i2c_send_byte((addrs[i] << 1) | 0);
-    soft_i2c_stop();
-    if (ack == 0) {  // ACK received = 设备存在
-      // printf("QMC5883P: addr 0x%02X ACK!\n", addrs[i]);
-
-      // 读取完整寄存器空间，尝试识别芯片
-      // printf("  Reg dump:");
-      for (uint8_t reg = 0; reg <= 0x0D; reg++) {
-        uint8_t val = i2c_reg_read(I2C_MAG, addrs[i], reg);
-        // printf(" %02X", val);
-      }
-      // printf("\n");
-
-      // 尝试用单次模式触发一次测量
-      i2c_reg_write(I2C_MAG, addrs[i], 0x02, 0x01);  // 单次模式
-      delay_ms(10);
-      uint8_t d3[6];
-      i2c_reg_read_multi(I2C_MAG, addrs[i], 0x00, d3, 6);
-      // printf("  Single: %02X%02X %02X%02X %02X%02X",
-      //        d3[1], d3[0], d3[3], d3[2], d3[5], d3[4]);
-
-      i2c_reg_write(I2C_MAG, addrs[i], 0x02, 0x00);  // 切回连续
-      delay_ms(10);
-      uint8_t d4[6];
-      i2c_reg_read_multi(I2C_MAG, addrs[i], 0x00, d4, 6);
-      // printf(" Cont: %02X%02X %02X%02X %02X%02X\n",
-      //        d4[1], d4[0], d4[3], d4[2], d4[5], d4[4]);
-
-      // printf("  -> Chip at 0x%02X may need different init sequence\n", addrs[i]);
-
-      found = 1;
-      break;
-    }
-  }
-
-  if (!found) {
-    // printf("QMC5883P: no ACK at any address!\n");
-  }
+  /* QMC5883P: 连续采样、200Hz、±8G、OSR512 */
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x09, 0x1D);  // CR1: 连续模式
+  delay_ms(10);
 }
 
 /**
- * @brief 读取磁力计原始数据，计算地磁模长
+ * @brief 读取磁力计原始数据（LSB first），计算地磁模长
+ * @note  ±8G 量程下 1LSB = 1/2048 G
  */
 void qmc5883p_get_raw_data(void) {
   uint8_t buf[6] = {0};
   i2c_reg_read_multi(I2C_MAG, QMC5883P_ADDR, 0x00, buf, 6);
+
+  /* QMC5883P 小端序: X_L, X_H, Y_L, Y_H, Z_L, Z_H */
   int16_t mx_raw = (buf[1] << 8) | buf[0];
   int16_t my_raw = (buf[3] << 8) | buf[2];
   int16_t mz_raw = (buf[5] << 8) | buf[4];
 
-  mag_raw.mx = mx_raw;
-  mag_raw.my = my_raw;
-  mag_raw.mz = mz_raw;
+  mag_raw.mx = mx_raw / 2048.0f;  /* 转换为高斯 */
+  mag_raw.my = my_raw / 2048.0f;
+  mag_raw.mz = mz_raw / 2048.0f;
   mag_raw.mag_norm = sqrtf(mag_raw.mx * mag_raw.mx + mag_raw.my * mag_raw.my +
                            mag_raw.mz * mag_raw.mz);
 }
@@ -549,7 +511,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   update_day_night_mode(rtc_hour);
 
   // 采集传感器原始数据
-  icm42670_get_raw_data();
+  // icm42670_get_raw_data();
   qmc5883p_get_raw_data();
   // 检测前后地磁向量模长，参数值判断磁场是否被干扰
   mag_disturb_detect();
@@ -602,7 +564,7 @@ void imu_main_loop(uint8_t rtc_hour) {
  * 外部需提前初始化：GPIO、I2C0/I2C1、USART1、Systick、RTC、定时器
  */
 void imu_system_init(void) {
-  icm42670_init();
+  // icm42670_init();
   qmc5883p_init();
   load_install_zero_point(); // 上电加载安装标定零点
 }
@@ -867,11 +829,11 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 1000 == 0) {
-        proto_send(usart0_rx_buffer[2]);
+      if (debug_cnt % 100 == 0) {
+        // proto_send(usart0_rx_buffer[2]);
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
-        // printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
-        //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
+        printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
+               mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
         // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
