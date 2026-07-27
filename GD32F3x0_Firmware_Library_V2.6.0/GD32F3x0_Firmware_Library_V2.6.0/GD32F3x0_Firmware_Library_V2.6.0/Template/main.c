@@ -5,6 +5,7 @@
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
+#include "soft_i2c.h"
 #include <stdint.h>
 
 #define delay_ms(x) delay_1ms(x)
@@ -32,38 +33,6 @@
 #define MAG_DISTURB_THRESH 120.0f   // 地磁突变判定阈值
 
 /************************ 全局数据结构体 ************************/
-// IMU原始传感器数据
-typedef struct {
-  float ax;   // X轴加速度 g
-  float ay;   // Y轴加速度 g
-  float az;   // Z轴加速度 g
-  float gx;   // X轴角速度 °/s
-  float gy;   // Y轴角速度 °/s
-  float gz;   // Z轴角速度 °/s
-  float temp; // 芯片温度 ℃
-} icm_raw_data_t;
-
-// 磁力计原始数据（类型定义移到了 main.h）
-
-// 姿态结构体：实时角度 + 安装标定基准零点
-typedef struct {
-  float w, x, y, z;
-} quaternion_t;
-
-// typedef struct {
-//   float pitch;      // 实时俯仰角 X轴
-//   float roll;       // 实时横滚角 Y轴
-//   float yaw_now;    // 实时旋转角 Z轴(绕灯杆)
-//   float pitch_base; // 安装基准俯仰零点
-//   float roll_base;  // 安装基准横滚零点
-//   float yaw_base;   // 安装基准旋转零点
-// } attitude_info_t;
-
-// 陀螺温度补偿零偏参数
-typedef struct {
-  float gz_bias;  // Z轴陀螺静态零偏
-  float temp_ref; // 标定时基准温度
-} gyro_bias_t;
 
 // 全局变量
 icm_raw_data_t icm_raw;
@@ -94,61 +63,6 @@ __IO uint16_t rxcount = 0;
 uint8_t usart0_rx_buffer[USART0_RX_BUF_SIZE];
 volatile uint16_t usart0_rx_len = 0;
 volatile uint8_t usart0_rx_flag = 0;
-
-/************************ 底层I2C通用读写函数 ************************/
-void soft_i2c_init(void);
-void soft_i2c_start(void);
-void soft_i2c_stop(void);
-uint8_t soft_i2c_send_byte(uint8_t byte);
-uint8_t soft_i2c_read_byte(uint8_t ack);
-
-/**
- * @brief I2C读取单个寄存器
- * @param i2c_periph:I2C外设 I2C0/I2C1
- * @param dev_addr:设备7位地址
- * @param reg:寄存器地址
- * @retval 读取到的寄存器数值
- */
-uint8_t i2c_reg_read(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg) {
-  soft_i2c_start();
-  soft_i2c_send_byte((dev_addr << 1) | 0);
-  soft_i2c_send_byte(reg);
-  soft_i2c_start();
-  soft_i2c_send_byte((dev_addr << 1) | 1);
-  uint8_t data = soft_i2c_read_byte(0);
-  soft_i2c_stop();
-  return data;
-}
-
-/**
- * @brief I2C单寄存器写入
- */
-void i2c_reg_write(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg,
-                   uint8_t data) {
-  soft_i2c_start();
-  soft_i2c_send_byte((dev_addr << 1) | 0);
-  soft_i2c_send_byte(reg);
-  soft_i2c_send_byte(data);
-  soft_i2c_stop();
-}
-
-/**
- * @brief I2C连续批量读取多字节
- */
-void i2c_reg_read_multi(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg,
-                        uint8_t *buf, uint16_t len) {
-  soft_i2c_start();
-  soft_i2c_send_byte((dev_addr << 1) | 0);
-  soft_i2c_send_byte(reg);
-  soft_i2c_start();
-  soft_i2c_send_byte((dev_addr << 1) | 1);
-
-  for (uint16_t i = 0; i < len; i++) {
-    buf[i] = soft_i2c_read_byte((i < len - 1) ? 1 : 0);
-  }
-
-  soft_i2c_stop();
-}
 
 /************************ ICM42670 驱动函数 ************************/
 /**
@@ -886,149 +800,6 @@ void DMA_Channel1_2_IRQHandler(void) {
   }
 }
 
-void rcu_config(void) { rcu_periph_clock_enable(RCU_GPIOA); }
-
-void gpio_config(void) {
-  gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_0);
-  gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_1);
-  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_0);
-  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0);
-  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_1);
-  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_1);
-}
-
-/*!
-    \brief      configure the I2C0 interfaces
-    \param[in]  none
-    \param[out] none
-    \retval     none
-*/
-void i2c_config(void) { soft_i2c_init(); }
-
-void i2c_test(void) {
-  // printf("Soft I2C test with ACK detection...\n");
-
-  soft_i2c_init();
-
-  for (uint32_t j = 0; j < 5; j++) {
-    soft_i2c_start();
-    uint8_t ack = soft_i2c_send_byte(0xD0);
-    // printf("Try %lu: Send addr 0xD0, ack=%u (%s)\n", j, ack,
-    //        ack == 0 ? "ACK received" : "NACK");
-    soft_i2c_stop();
-    delay_ms(50);
-  }
-
-  // printf("Soft I2C test done!\n");
-}
-
-#define SOFT_I2C_SCL_PIN GPIO_PIN_0
-#define SOFT_I2C_SDA_PIN GPIO_PIN_1
-#define SOFT_I2C_PORT GPIOA
-
-#define SCL_H() gpio_bit_set(SOFT_I2C_PORT, SOFT_I2C_SCL_PIN)
-#define SCL_L() gpio_bit_reset(SOFT_I2C_PORT, SOFT_I2C_SCL_PIN)
-#define SDA_H() gpio_bit_set(SOFT_I2C_PORT, SOFT_I2C_SDA_PIN)
-#define SDA_L() gpio_bit_reset(SOFT_I2C_PORT, SOFT_I2C_SDA_PIN)
-#define SDA_IN() gpio_input_bit_get(SOFT_I2C_PORT, SOFT_I2C_SDA_PIN)
-
-void soft_i2c_init(void) {
-  rcu_periph_clock_enable(RCU_GPIOA);
-
-  gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP,
-                GPIO_PIN_0 | GPIO_PIN_1);
-  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ,
-                          GPIO_PIN_0 | GPIO_PIN_1);
-
-  SCL_H();
-  SDA_H();
-  delay_ms(10);
-}
-
-void soft_i2c_start(void) {
-  SDA_H();
-  SCL_H();
-  delay_us(5);
-  SDA_L();
-  delay_us(5);
-  SCL_L();
-  delay_us(5);
-}
-
-void soft_i2c_stop(void) {
-  SDA_L();
-  SCL_H();
-  delay_us(5);
-  SDA_H();
-  delay_us(5);
-}
-
-uint8_t soft_i2c_send_byte(uint8_t byte) {
-  uint8_t i;
-
-  for (i = 0; i < 8; i++) {
-    SCL_L();
-    delay_us(3);
-    if (byte & 0x80) {
-      SDA_H();
-    } else {
-      SDA_L();
-    }
-    delay_us(2);
-    SCL_H();
-    delay_us(5);
-    byte <<= 1;
-  }
-
-  SCL_L();
-  delay_us(3);
-  SDA_H();
-  delay_us(2);
-  SCL_H();
-  delay_us(5);
-
-  uint8_t ack = SDA_IN();
-
-  SCL_L();
-  delay_us(5);
-
-  return (ack == 0) ? 0 : 1;
-}
-
-uint8_t soft_i2c_read_byte(uint8_t ack) {
-  uint8_t i, byte = 0;
-
-  SDA_H();
-
-  for (i = 0; i < 8; i++) {
-    SCL_L();
-    delay_us(5);
-    SCL_H();
-    delay_us(3);
-    byte <<= 1;
-    if (SDA_IN()) {
-      byte |= 0x01;
-    }
-    delay_us(2);
-  }
-
-  SCL_L();
-  delay_us(3);
-  if (ack) {
-    SDA_L();
-  } else {
-    SDA_H();
-  }
-  delay_us(2);
-  SCL_H();
-  delay_us(5);
-
-  SCL_L();
-  delay_us(5);
-
-  return byte;
-}
-
 void timer_config(void) {
   timer_parameter_struct timer_initpara;
 
@@ -1071,11 +842,8 @@ int main(void) {
   // usart_interrupt_enable(USART0, USART_INT_TBE);
   // printf("hello_word");
   /* configure RCU */
-  rcu_config();
-  /* configure GPIO */
-  gpio_config();
-  /* configure I2C */
-  i2c_config();
+  /* I2C 软模拟初始化（soft_i2c_init 内部已配置 GPIO 和时钟） */
+  soft_i2c_init();
   // printf("I2C init done!\n");
 
   // i2c_test();
@@ -1101,6 +869,7 @@ int main(void) {
       debug_cnt++;
       if (debug_cnt % 1000 == 0) {
         proto_send(usart0_rx_buffer[2]);
+        // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
         // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);

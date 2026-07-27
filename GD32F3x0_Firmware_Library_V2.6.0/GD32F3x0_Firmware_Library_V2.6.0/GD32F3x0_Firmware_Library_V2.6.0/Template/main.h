@@ -45,6 +45,16 @@ OF SUCH DAMAGE.
 
 #include <stdint.h>
 
+typedef struct {
+  float w, x, y, z;
+} quaternion_t;
+
+// 陀螺温度补偿零偏参数
+typedef struct {
+  float gz_bias;  // Z轴陀螺静态零偏
+  float temp_ref; // 标定时基准温度
+} gyro_bias_t;
+
 /* 姿态信息结构体 */
 typedef struct {
   float pitch;      /*!< 实时俯仰角 X轴 */
@@ -63,11 +73,30 @@ typedef struct {
   float mag_norm;
 } mag_raw_data_t;
 
+// IMU原始传感器数据
+typedef struct {
+  float ax;   // X轴加速度 g
+  float ay;   // Y轴加速度 g
+  float az;   // Z轴加速度 g
+  float gx;   // X轴角速度 °/s
+  float gy;   // Y轴角速度 °/s
+  float gz;   // Z轴角速度 °/s
+  float temp; // 芯片温度 ℃
+} icm_raw_data_t;
+
 /* 全局变量声明（定义在 main.c） */
-extern attitude_info_t att;
+extern icm_raw_data_t icm_raw;
 extern mag_raw_data_t mag_raw;
-extern uint8_t mag_disturb_flag;
-extern uint8_t fault_type;
+extern attitude_info_t att;
+extern gyro_bias_t gyro_bias;
+extern quaternion_t quat;
+
+extern uint8_t day_mode;                 // 1=白天6轴模式 0=夜间9轴融合
+extern uint8_t mag_disturb_flag;         // 地磁受大车干扰标记
+extern uint8_t fault_type;               // 偏转报警类型标记
+// extern uint16_t alarm_filter_cnt; // 报警防抖计数器
+extern uint32_t stable_cnt;
+// extern volatile uint8_t imu_loop_flag; // 定时器中断标志
 
 void imu_main_loop(uint8_t rtc_hour);
 int save_install_zero_point(void);
