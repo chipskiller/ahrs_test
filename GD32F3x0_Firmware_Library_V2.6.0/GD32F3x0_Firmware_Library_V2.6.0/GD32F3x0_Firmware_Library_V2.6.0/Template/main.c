@@ -116,18 +116,40 @@ void icm42670_get_raw_data(void) {
 
 /************************ 磁力计驱动 ************************/
 void qmc5883p_init(void) {
-  /* QMC5883P: 连续采样、200Hz、±8G、OSR512 */
-  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x09, 0x1D);  // CR1: 连续模式
+  /* Step 1: 软复位 Control(0x0B) bit7=1 */
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0B, 0x80);
+  delay_ms(100);
+
+  /* Step 2: 退出复位 */
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0B, 0x00);
+  delay_ms(100);
+
+  /* Step 3: 读 Chip ID 校验 (0x00 = 0x80) */
+  uint8_t id = i2c_reg_read(I2C_MAG, QMC5883P_ADDR, 0x00);
+  if (id != 0x80) {
+    printf("QMC5883P not detected, ID=0x%02X\r\n", id);
+  } else {
+    printf("got id: 0x%02X\r\n", id);
+  }
+
+  /* Step 4: 配置 Control(0x0B) bits3-2=10(±8G), set_and_reset_on
+     0x0C = 0b00001100 */
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0B, 0x0C);
+  delay_ms(10);
+  /* Step 5: 配置 Control Register 1 (0x0A): 连续模式 + 200Hz + OSR1=8 + OSR2=2
+     0x4F = 0b01001111 */
+  i2c_reg_write(I2C_MAG, QMC5883P_ADDR, 0x0A, 0x4F);
   delay_ms(10);
 }
 
 /**
  * @brief 读取磁力计原始数据（LSB first），计算地磁模长
  * @note  ±8G 量程下 1LSB = 1/2048 G
+ * @note  寄存器 0x00=ChipID, 0x01~0x06=数据, 从 0x01 开始读
  */
 void qmc5883p_get_raw_data(void) {
   uint8_t buf[6] = {0};
-  i2c_reg_read_multi(I2C_MAG, QMC5883P_ADDR, 0x00, buf, 6);
+  i2c_reg_read_multi(I2C_MAG, QMC5883P_ADDR, 0x01, buf, 6);
 
   /* QMC5883P 小端序: X_L, X_H, Y_L, Y_H, Z_L, Z_H */
   int16_t mx_raw = (buf[1] << 8) | buf[0];
@@ -511,7 +533,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   update_day_night_mode(rtc_hour);
 
   // 采集传感器原始数据
-  // icm42670_get_raw_data();
+  icm42670_get_raw_data();
   qmc5883p_get_raw_data();
   // 检测前后地磁向量模长，参数值判断磁场是否被干扰
   mag_disturb_detect();
@@ -564,7 +586,7 @@ void imu_main_loop(uint8_t rtc_hour) {
  * 外部需提前初始化：GPIO、I2C0/I2C1、USART1、Systick、RTC、定时器
  */
 void imu_system_init(void) {
-  // icm42670_init();
+  icm42670_init();
   qmc5883p_init();
   load_install_zero_point(); // 上电加载安装标定零点
 }
@@ -829,10 +851,10 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 100 == 0) {
+      if (debug_cnt % 10 == 0) {
         // proto_send(usart0_rx_buffer[2]);
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
-        printf("mag_norm=%.4f\r\n,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\r\n",
+        printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
                mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
         // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",

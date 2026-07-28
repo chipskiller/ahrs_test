@@ -184,3 +184,15 @@ void i2c_reg_read_multi(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg,
 
     soft_i2c_stop();
 }
+
+/*!
+    \brief      探测 I2C 设备是否在线（发地址+W，检查 ACK）
+    \param[in]  dev_addr: 设备 7 位地址
+    \retval     0 = 设备在线（收到 ACK）, 1 = 设备离线（收到 NACK）
+*/
+uint8_t soft_i2c_probe(uint8_t dev_addr) {
+    soft_i2c_start();
+    uint8_t nack = soft_i2c_send_byte(dev_addr << 1);  /* 发地址+W，读 ACK */
+    soft_i2c_stop();
+    return nack;  /* 0=ACK(在线), 1=NACK(离线) */
+}

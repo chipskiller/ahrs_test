@@ -31,6 +31,7 @@ uint8_t i2c_reg_read(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg);
 void   i2c_reg_write(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg, uint8_t data);
 void   i2c_reg_read_multi(uint32_t i2c_periph, uint8_t dev_addr, uint8_t reg,
                           uint8_t *buf, uint16_t len);
+uint8_t soft_i2c_probe(uint8_t dev_addr);  /* 探测设备：返回 0=在线(ACK) / 1=离线(NACK) */
 
 #ifdef __cplusplus
 }
