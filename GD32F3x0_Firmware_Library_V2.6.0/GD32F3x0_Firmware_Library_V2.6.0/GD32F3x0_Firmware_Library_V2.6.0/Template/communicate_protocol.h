@@ -157,19 +157,34 @@ void alarm_status_read_send() {
   usart0_tx_dma_send(buf, idx);
 }
 
-/*读取地磁强度返回（使用 mag_raw.mag_norm）*/
+/*读取地磁强度返回（使用 mag_raw.mag_norm 及三轴分量）*/
 void mag_strength_read_send() {
   uint16_t idx = 0;
-
-  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm); // float 转 uint16
 
   buf[idx++] = 0x55; // head_
   buf[idx++] = 0;    // len_ 暂填
   buf[idx++] = 0x8A; // cmd_ 读取地磁强度
 
-  buf[idx++] = 0x00;                      // 读取参数
-  buf[idx++] = (uint8_t)(mag_val >> 8);   // 数据高位
-  buf[idx++] = (uint8_t)(mag_val & 0xFF); // 数据低位
+  buf[idx++] = 0x00; // 读取参数
+
+  // mag_norm 整数值
+  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm);
+  buf[idx++] = (uint8_t)(mag_val >> 8);
+  buf[idx++] = (uint8_t)(mag_val & 0xFF);
+
+  // 三轴分量：先乘100保留两位小数，再转 int16
+  int16_t mx_i = (int16_t)(mag_raw.mx * 100.0f);
+  int16_t my_i = (int16_t)(mag_raw.my * 100.0f);
+  int16_t mz_i = (int16_t)(mag_raw.mz * 100.0f);
+  buf[idx++] = (mx_i < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(mx_i < 0 ? -mx_i : mx_i) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(mx_i < 0 ? -mx_i : mx_i) & 0xFF);
+  buf[idx++] = (my_i < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(my_i < 0 ? -my_i : my_i) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(my_i < 0 ? -my_i : my_i) & 0xFF);
+  buf[idx++] = (mz_i < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(mz_i < 0 ? -mz_i : mz_i) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(mz_i < 0 ? -mz_i : mz_i) & 0xFF);
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
