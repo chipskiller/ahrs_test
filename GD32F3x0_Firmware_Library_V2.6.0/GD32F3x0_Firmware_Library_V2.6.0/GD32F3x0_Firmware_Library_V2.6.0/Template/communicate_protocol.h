@@ -58,8 +58,8 @@ void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
 
   buf[idx++] = mag_disturb_flag ? 1 : 0; // if_mag_disturb_
   buf[idx++] =
-      (uint8_t)((uint16_t)(icm_raw.temp * 100) >> 8); // 温度值，单位摄氏度
-  buf[idx++] = (uint8_t)((uint16_t)(icm_raw.temp * 100) & 0xFF);
+      (uint8_t)((uint16_t)(ahrs.icm.temp * 100) >> 8); // 温度值，单位摄氏度
+  buf[idx++] = (uint8_t)((uint16_t)(ahrs.icm.temp * 100) & 0xFF);
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1); // 从 len_ 到最后一个数据字节数
   buf[1] = frame_len;                     // 填入 len_
@@ -82,7 +82,7 @@ void set_zero_angle() {
 
   buf[idx++] = 0x00; // 零位设置参数
 
-  if (save_install_zero_point() == 1) {
+  if (ahrs_save_zero_point(&ahrs) == 1) {
     buf[idx++] = 0x00; // 成功
   } else {
     buf[idx++] = 0x01; // 失败
@@ -109,20 +109,20 @@ void zero_angle_read_send() {
 
   buf[idx++] = 0x00; // 读取参数
 
-  // Roll (att.roll_base)
-  buf[idx++] = (att.roll_base < 0) ? 0x80 : 0x00;
-  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.roll_base) * 100) >> 8);
-  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.roll_base) * 100) & 0xFF);
+  // Roll (ahrs.att.roll_base)
+  buf[idx++] = (ahrs.att.roll_base < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(ahrs.att.roll_base) * 100) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(ahrs.att.roll_base) * 100) & 0xFF);
 
-  // Pitch (att.pitch_base)
-  buf[idx++] = (att.pitch_base < 0) ? 0x80 : 0x00;
-  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.pitch_base) * 100) >> 8);
-  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.pitch_base) * 100) & 0xFF);
+  // Pitch (ahrs.att.pitch_base)
+  buf[idx++] = (ahrs.att.pitch_base < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(ahrs.att.pitch_base) * 100) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(ahrs.att.pitch_base) * 100) & 0xFF);
 
-  // Yaw (att.yaw_base)
-  buf[idx++] = (att.yaw_base < 0) ? 0x80 : 0x00;
-  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.yaw_base) * 100) >> 8);
-  buf[idx++] = (uint8_t)((uint16_t)(fabsf(att.yaw_base) * 100) & 0xFF);
+  // Yaw (ahrs.att.yaw_base)
+  buf[idx++] = (ahrs.att.yaw_base < 0) ? 0x80 : 0x00;
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(ahrs.att.yaw_base) * 100) >> 8);
+  buf[idx++] = (uint8_t)((uint16_t)(fabsf(ahrs.att.yaw_base) * 100) & 0xFF);
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
@@ -144,7 +144,7 @@ void alarm_status_read_send() {
   buf[idx++] = 0x87; // cmd_ 偏转报警状态读取
 
   buf[idx++] = 0x00;       // 读取参数
-  buf[idx++] = fault_type; // 状态
+  buf[idx++] = ahrs.fault_type; // 状态
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
@@ -161,15 +161,21 @@ void alarm_status_read_send() {
 void mag_strength_read_send() {
   uint16_t idx = 0;
 
-  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm); // float 转 uint16
+  uint16_t mag_val = (uint16_t)(ahrs.mag.mag_norm); // float 转 uint16
 
   buf[idx++] = 0x55; // head_
   buf[idx++] = 0;    // len_ 暂填
   buf[idx++] = 0x8A; // cmd_ 读取地磁强度
 
   buf[idx++] = 0x00;                      // 读取参数
-  buf[idx++] = (uint8_t)(mag_val >> 8);   // 数据高位
-  buf[idx++] = (uint8_t)(mag_val & 0xFF); // 数据低位
+  buf[idx++] = (uint8_t)(mag_val*100 >> 8);   // 数据高位
+  buf[idx++] = (uint8_t)(mag_val*100 & 0xFF); // 数据低位
+  buf[idx++]=(uint8_t)((uint16_t)ahrs.mag.mx*100 >> 8);
+  buf[idx++]=(uint8_t)((uint16_t)ahrs.mag.mx*100 & 0xFF);
+  buf[idx++]=(uint8_t)((uint16_t)ahrs.mag.my*100 >> 8);
+  buf[idx++]=(uint8_t)((uint16_t)ahrs.mag.my*100 & 0xFF);
+  buf[idx++]=(uint8_t)((uint16_t)ahrs.mag.mz*100 >> 8);
+  buf[idx++]=(uint8_t)((uint16_t)ahrs.mag.mz*100 & 0xFF);
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
@@ -238,7 +244,7 @@ void proto_send(uint8_t cmd) {
   static uint8_t seq = 0;
   switch (seq) {
   case 0:
-    angle_send(att.pitch, att.roll, att.yaw_now, mag_disturb_flag);
+    angle_send(ahrs.att.pitch, ahrs.att.roll, ahrs.att.yaw_now, ahrs.mag_disturb_flag);
     break;
   case 1:
     heartbeat_send();
