@@ -851,11 +851,11 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 10 == 0) {
-        // proto_send(usart0_rx_buffer[2]);
+      if (debug_cnt % 1000 == 0) {
+        proto_send(usart0_rx_buffer[2]);
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
-        printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
-               mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
+        // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
+        //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
         // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,

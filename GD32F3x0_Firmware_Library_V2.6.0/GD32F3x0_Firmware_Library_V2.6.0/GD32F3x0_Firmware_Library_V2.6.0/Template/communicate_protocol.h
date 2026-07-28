@@ -209,16 +209,16 @@ void heartbeat_send() {
   static uint8_t counter = 0;
   uint16_t idx = 0;
 
-  buf[idx++] = 0x55;       // head_
-  buf[idx++] = 0;          // len_ 暂填
-  buf[idx++] = 0x8E;       // cmd_ 心跳
+  buf[idx++] = 0x55; // head_
+  buf[idx++] = 0;    // len_ 暂填
+  buf[idx++] = 0x8E; // cmd_ 心跳
 
-  buf[idx++] = 0x00;       // 参数
-  buf[idx++] = counter++;  // 心跳计数（每帧+1，溢出自动归零）
+  buf[idx++] = 0x00;      // 参数
+  buf[idx++] = counter++; // 心跳计数（每帧+1，溢出自动归零）
 
   /* 探测 I2C 从设备是否在线（0=在线，1=离线）*/
-  buf[idx++] = soft_i2c_probe(0x68);  // IMU(ICM42670) 状态
-  buf[idx++] = soft_i2c_probe(0x2C);  // MAG(QMC5883P) 状态
+  buf[idx++] = soft_i2c_probe(0x68); // IMU(ICM42670) 状态
+  buf[idx++] = soft_i2c_probe(0x2C); // MAG(QMC5883P) 状态
 
   uint8_t frame_len = (uint8_t)(idx - 1);
   buf[1] = frame_len;
@@ -243,7 +243,11 @@ void proto_send(uint8_t cmd) {
   case 1:
     heartbeat_send();
     break;
+  case 2:
+    mag_strength_read_send();
+    break;
   }
   seq++;
-  if (seq >= 2) seq = 0;
+  if (seq >= 3)
+    seq = 0;
 }
