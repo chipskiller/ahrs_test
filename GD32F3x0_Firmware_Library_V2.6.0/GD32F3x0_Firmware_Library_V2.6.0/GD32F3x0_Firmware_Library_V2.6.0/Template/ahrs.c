@@ -22,20 +22,14 @@
 
 /* ========== 内部辅助 ========== */
 
-static void quat_normalize(ahrs_t *self) {
-  float norm = sqrtf(self->quat.w * self->quat.w +
-                     self->quat.x * self->quat.x +
-                     self->quat.y * self->quat.y +
-                     self->quat.z * self->quat.z);
+static void quat_normalize(quaternion_t *q) {
+  float norm = sqrtf(q->w * q->w + q->x * q->x + q->y * q->y + q->z * q->z);
   if (norm > 0.0001f) {
-    self->quat.w /= norm;
-    self->quat.x /= norm;
-    self->quat.y /= norm;
-    self->quat.z /= norm;
+    q->w /= norm; q->x /= norm; q->y /= norm; q->z /= norm;
   }
 }
 
-static void euler_to_quat(ahrs_t *self, float pitch_deg, float roll_deg, float yaw_deg) {
+static void euler_to_quat(quaternion_t *q, float pitch_deg, float roll_deg, float yaw_deg) {
   float p = pitch_deg * 0.0174533f * 0.5f;
   float r = roll_deg   * 0.0174533f * 0.5f;
   float y = yaw_deg    * 0.0174533f * 0.5f;
@@ -44,12 +38,12 @@ static void euler_to_quat(ahrs_t *self, float pitch_deg, float roll_deg, float y
   float cr = cosf(r), sr = sinf(r);
   float cy = cosf(y), sy = sinf(y);
 
-  self->quat.w = cp * cr * cy + sp * sr * sy;
-  self->quat.x = sp * cr * cy - cp * sr * sy;
-  self->quat.y = cp * sr * cy + sp * cr * sy;
-  self->quat.z = cp * cr * sy - sp * sr * cy;
+  q->w = cp * cr * cy + sp * sr * sy;
+  q->x = sp * cr * cy - cp * sr * sy;
+  q->y = cp * sr * cy + sp * cr * sy;
+  q->z = cp * cr * sy - sp * sr * cy;
 
-  quat_normalize(self);
+  quat_normalize(q);
 }
 
 static void flash_read(uint32_t addr, void *data, uint16_t len) {
@@ -154,14 +148,8 @@ static void mag_disturb_detect(ahrs_t *self) {
 
 /* ========== 姿态解算 ========== */
 
-void ahrs_calc_6axis(ahrs_t *self) {
-  float ax = self->icm.ax;
-  float ay = self->icm.ay;
-  float az = self->icm.az;
-  float gx = self->icm.gx;
-  float gy = self->icm.gy;
-  float gz = self->icm.gz;
-  float temp = self->icm.temp;
+void ahrs_calc_6axis(ahrs_t *self, float ax, float ay, float az,
+                     float gx, float gy, float gz, float temp) {
 
   if (self->first_run) {
     self->gx_sum += gx;
@@ -177,7 +165,7 @@ void ahrs_calc_6axis(ahrs_t *self) {
 
       float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
       float accel_roll  = atan2f(ay, az) * 57.3f;
-      euler_to_quat(self, accel_pitch, accel_roll, 0.0f);
+      euler_to_quat(&self->quat, accel_pitch, accel_roll, 0.0f);
       self->first_run = 0;
     } else {
       self->att.pitch   = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
@@ -247,7 +235,7 @@ void ahrs_calc_6axis(ahrs_t *self) {
   self->quat.y += dq2;
   self->quat.z += dq3;
 
-  quat_normalize(self);
+  quat_normalize(&self->quat);
 
   if (self->att_stable_cnt > 100) {
     self->gx_bias = self->gx_bias * 0.999f + gx * 0.001f;
@@ -270,20 +258,11 @@ void ahrs_calc_6axis(ahrs_t *self) {
 }
 
 void ahrs_calc_9axis(ahrs_t *self) {
-  /* 临时翻转坐标系适配 9 轴 */
-  float ax = -self->icm.az, ay =  self->icm.ay, az =  self->icm.ax;
-  float gx = -self->icm.gz, gy =  self->icm.gy, gz =  self->icm.gx;
-
-  /* 用翻转后的值重新计算 6 轴 */
-  {
-    float temp_ax = self->icm.ax, temp_ay = self->icm.ay, temp_az = self->icm.az;
-    float temp_gx = self->icm.gx, temp_gy = self->icm.gy, temp_gz = self->icm.gz;
-    self->icm.ax = ax; self->icm.ay = ay; self->icm.az = az;
-    self->icm.gx = gx; self->icm.gy = gy; self->icm.gz = gz;
-    ahrs_calc_6axis(self);
-    self->icm.ax = temp_ax; self->icm.ay = temp_ay; self->icm.az = temp_az;
-    self->icm.gx = temp_gx; self->icm.gy = temp_gy; self->icm.gz = temp_gz;
-  }
+  /* 翻转坐标系适配 9 轴，直接传参给 6 轴解算 */
+  ahrs_calc_6axis(self,
+    -self->icm.az,  self->icm.ay,  self->icm.ax,
+    -self->icm.gz,  self->icm.gy,  self->icm.gx,
+     self->icm.temp);
 
   if (self->day_mode == 0 && self->mag_disturb_flag == 0) {
     float pitch_rad = self->att.pitch * 0.0174533f;
@@ -317,7 +296,9 @@ int ahrs_save_zero_point(ahrs_t *self) {
   float yaw_sum = 0.0f, pit_sum = 0.0f, rol_sum = 0.0f;
   for (uint16_t i = 0; i < 500; i++) {
     ahrs_icm_read(self);
-    ahrs_calc_6axis(self);
+    ahrs_calc_6axis(self, self->icm.ax, self->icm.ay, self->icm.az,
+                     self->icm.gx, self->icm.gy, self->icm.gz,
+                     self->icm.temp);
     yaw_sum += self->att.yaw_now;
     pit_sum += self->att.pitch;
     rol_sum += self->att.roll;
@@ -400,7 +381,9 @@ void ahrs_update(ahrs_t *self, uint8_t rtc_hour) {
   ahrs_mag_read(self);
   mag_disturb_detect(self);
 
-  ahrs_calc_6axis(self);
+  ahrs_calc_6axis(self, self->icm.ax, self->icm.ay, self->icm.az,
+                   self->icm.gx, self->icm.gy, self->icm.gz,
+                   self->icm.temp);
 
   /* 报警检测 */
   float yaw_offset = fabsf(self->att.yaw_now - self->att.yaw_base);

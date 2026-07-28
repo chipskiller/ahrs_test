@@ -93,8 +93,9 @@ void ahrs_update(ahrs_t *self, uint8_t rtc_hour);
 void ahrs_icm_read(ahrs_t *self);
 void ahrs_mag_read(ahrs_t *self);
 
-/* 姿态解算 */
-void ahrs_calc_6axis(ahrs_t *self);
+/* 姿态解算（IMU 数据由参数传入，与结构体解耦） */
+void ahrs_calc_6axis(ahrs_t *self, float ax, float ay, float az,
+                     float gx, float gy, float gz, float temp);
 void ahrs_calc_9axis(ahrs_t *self);
 
 /* Flash 标定零点 */
