@@ -146,18 +146,22 @@ static void mag_disturb_detect(ahrs_t *self) {
   self->mag_disturb_flag = (delta > self->mag_disturb_thresh) ? 1 : 0;
 }
 
+
 /* ========== 姿态解算 ========== */
 
 void ahrs_calc_6axis(ahrs_t *self, float ax, float ay, float az,
                      float gx, float gy, float gz, float temp) {
 
+  //  第一次运行时，进行陀螺仪零偏初始化和加速度计初始姿态计算                    
   if (self->first_run) {
+    // 计算陀螺仪零偏
     self->gx_sum += gx;
     self->gy_sum += gy;
     self->gz_sum += gz;
     self->init_cnt++;
 
     if (self->init_cnt >= 200) {
+      // 储存零偏值
       self->gx_bias = self->gx_sum / 200.0f;
       self->gy_bias = self->gy_sum / 200.0f;
       self->gyro_bias.gz_bias = self->gz_sum / 200.0f;
