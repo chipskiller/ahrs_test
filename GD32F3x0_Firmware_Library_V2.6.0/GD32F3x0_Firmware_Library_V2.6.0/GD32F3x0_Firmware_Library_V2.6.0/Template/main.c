@@ -20,16 +20,15 @@
 #define USART_RS485 USART1 // RS485上报串口
 #define I2C_TIMEOUT 10000U // I2C通信超时计数
 
-// Flash参数存储分区（GD32F330 Flash每页1024字节，使用末尾3页）
+// Flash参数存储分区（GD32F330 Flash每页1024字节，使用末尾4页）
 #define FLASH_PAGE_SIZE 1024U
 #define FLASH_ZONE_A 0x0800FC00U    // 姿态基准备份A
 #define FLASH_ZONE_B 0x0800FD00U    // 姿态基准备份B
 #define FLASH_GYRO_BIAS 0x0800FE00U // 陀螺温度零偏存储区
+#define FLASH_ALARM_CFG 0x0800FF00U // 报警参数存储区
 
 // 采样与报警配置
 #define DT 0.01f                    // 10ms采样周期 100Hz
-#define ANGLE_ALARM_THRESHOLD 10.0f // 角度偏移报警阈值10°
-#define ALARM_FILTER_CNT 200U       // 2s防抖帧数(200*10ms)
 #define MAG_DISTURB_THRESH 120.0f   // 地磁突变判定阈值
 
 /************************ 全局数据结构体 ************************/
@@ -47,6 +46,16 @@ uint8_t fault_type = 0;               // 偏转报警类型标记
 static uint16_t alarm_filter_cnt = 0; // 报警防抖计数器
 uint32_t stable_cnt;
 volatile uint8_t imu_loop_flag = 0; // 定时器中断标志
+
+// 报警参数变量（可由上位机修改并保存到Flash）
+// 默认值：轻微 X=8° Y=15° Z=8° | 严重 X=20° Y=25° Z=20°
+float roll_mild_threshold = 8.0f;
+float pitch_mild_threshold = 15.0f;
+float yaw_mild_threshold = 8.0f;
+float roll_severe_threshold = 20.0f;
+float pitch_severe_threshold = 25.0f;
+float yaw_severe_threshold = 20.0f;
+uint16_t alarm_warning_time = 180; // 预警时间(秒)
 
 #define ARRAYNUM(arr_nanme) (uint32_t)(sizeof(arr_nanme) / sizeof(*(arr_nanme)))
 #define TRANSMIT_SIZE (ARRAYNUM(transmitter_buffer) - 1)
@@ -481,6 +490,78 @@ void load_install_zero_point(void) {
   }
 }
 
+/************************ 报警参数Flash存储（偏转阈值/预警时间） ************************/
+typedef struct {
+  float roll_mild;
+  float pitch_mild;
+  float yaw_mild;
+  float roll_severe;
+  float pitch_severe;
+  float yaw_severe;
+  uint16_t warning_time;
+  uint16_t reserved;
+} alarm_config_t;
+
+int save_alarm_config(void) {
+  alarm_config_t cfg;
+  alarm_config_t verify;
+  uint32_t *p;
+  uint8_t i;
+
+  cfg.roll_mild = roll_mild_threshold;
+  cfg.pitch_mild = pitch_mild_threshold;
+  cfg.yaw_mild = yaw_mild_threshold;
+  cfg.roll_severe = roll_severe_threshold;
+  cfg.pitch_severe = pitch_severe_threshold;
+  cfg.yaw_severe = yaw_severe_threshold;
+  cfg.warning_time = alarm_warning_time;
+  cfg.reserved = 0;
+
+  fmc_unlock();
+  fmc_page_erase(FLASH_ALARM_CFG);
+  p = (uint32_t *)&cfg;
+  for (i = 0; i < sizeof(alarm_config_t) / 4; i++) {
+    fmc_word_program(FLASH_ALARM_CFG + i * 4, p[i]);
+  }
+  fmc_lock();
+
+  // 读回验证
+  flash_read(FLASH_ALARM_CFG, (void *)&verify, sizeof(alarm_config_t));
+  if (0 != memcmp((const void *)&cfg, (const void *)&verify, sizeof(alarm_config_t))) {
+    return -1;
+  }
+  return 1;
+}
+
+void load_alarm_config(void) {
+  alarm_config_t cfg;
+  flash_read(FLASH_ALARM_CFG, (void *)&cfg, sizeof(alarm_config_t));
+
+  if (cfg.roll_mild < 1.0f || cfg.roll_mild > 45.0f ||
+      cfg.pitch_mild < 1.0f || cfg.pitch_mild > 45.0f ||
+      cfg.yaw_mild < 1.0f || cfg.yaw_mild > 45.0f ||
+      cfg.roll_severe < cfg.roll_mild || cfg.roll_severe > 90.0f ||
+      cfg.pitch_severe < cfg.pitch_mild || cfg.pitch_severe > 90.0f ||
+      cfg.yaw_severe < cfg.yaw_mild || cfg.yaw_severe > 90.0f ||
+      cfg.warning_time < 1 || cfg.warning_time > 3600) {
+    roll_mild_threshold = 8.0f;
+    pitch_mild_threshold = 15.0f;
+    yaw_mild_threshold = 8.0f;
+    roll_severe_threshold = 20.0f;
+    pitch_severe_threshold = 25.0f;
+    yaw_severe_threshold = 20.0f;
+    alarm_warning_time = 180;
+  } else {
+    roll_mild_threshold = cfg.roll_mild;
+    pitch_mild_threshold = cfg.pitch_mild;
+    yaw_mild_threshold = cfg.yaw_mild;
+    roll_severe_threshold = cfg.roll_severe;
+    pitch_severe_threshold = cfg.pitch_severe;
+    yaw_severe_threshold = cfg.yaw_severe;
+    alarm_warning_time = cfg.warning_time;
+  }
+}
+
 /************************ RS485串口上报函数 ************************/
 /**
  * @brief 串口发送字符串
@@ -552,31 +633,31 @@ void imu_main_loop(uint8_t rtc_hour) {
   float pit_offset = fabsf(att.pitch - att.pitch_base);
   float rol_offset = fabsf(att.roll - att.roll_base);
 
-  uint8_t trigger_alarm = 0;
-  // 任意轴偏移超过10°触发故障判定
-  if (pit_offset >= ANGLE_ALARM_THRESHOLD ||
-      rol_offset >= ANGLE_ALARM_THRESHOLD ||
-      yaw_offset >= ANGLE_ALARM_THRESHOLD) {
-    trigger_alarm = 1;
+  uint8_t alarm_level = 0x00;
+  // 检查严重偏转（超过严重阈值）
+  if (pit_offset >= pitch_severe_threshold ||
+      rol_offset >= roll_severe_threshold ||
+      yaw_offset >= yaw_severe_threshold) {
+    alarm_level = 0x02;
+  }
+  // 检查轻微偏转（超过轻微阈值，但未达严重）
+  else if (pit_offset >= pitch_mild_threshold ||
+           rol_offset >= roll_mild_threshold ||
+           yaw_offset >= yaw_mild_threshold) {
+    alarm_level = 0x01;
   }
 
-  // 2s防抖滤波，瞬时震动不报警
-  if (trigger_alarm == 1) {
+  // 防抖滤波（预警时间可运行时修改）
+  uint16_t alarm_time_max = alarm_warning_time * 100;
+  if (alarm_level != 0x00) {
     alarm_filter_cnt++;
-    if (alarm_filter_cnt > ALARM_FILTER_CNT) {
-      fault_type = 0;
-      // X/Y轴倾斜故障标记
-      if (pit_offset >= ANGLE_ALARM_THRESHOLD ||
-          rol_offset >= ANGLE_ALARM_THRESHOLD)
-        fault_type = 0x01;
-      // Z轴绕灯杆旋转故障标记
-      if (yaw_offset >= ANGLE_ALARM_THRESHOLD)
-        fault_type = 0x02;
-      // send_alarm_info(fault_type, att.pitch, att.roll, att.yaw_now);
-      alarm_filter_cnt = ALARM_FILTER_CNT;
+    if (alarm_filter_cnt > alarm_time_max) {
+      fault_type = alarm_level;
+      alarm_filter_cnt = alarm_time_max;
     }
   } else {
     alarm_filter_cnt = 0;
+    fault_type = 0x00;
   }
 }
 
@@ -589,6 +670,7 @@ void imu_system_init(void) {
   icm42670_init();
   qmc5883p_init();
   load_install_zero_point(); // 上电加载安装标定零点
+  load_alarm_config();       // 上电加载报警参数
 }
 
 // ## 外部补充初始化说明（需要自行添加）
@@ -852,7 +934,7 @@ int main(void) {
 
       debug_cnt++;
       if (debug_cnt % 1000 == 0) {
-        proto_send(usart0_rx_buffer[2]);
+        // proto_send(usart0_rx_buffer[2]);
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
@@ -867,102 +949,15 @@ int main(void) {
     // 处理串口数据（空闲中断已计算 usart0_rx_len）
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
-      // if (usart0_rx_len >= 3) {
-      //   uint8_t calc_cs =
-      //       calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
-      //   if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
-      //     /* 校验失败，丢弃此帧 */
-      //   } else {
-      //     // proto_send(usart0_rx_buffer[2]);
-      //   }
-      // }
+      if (usart0_rx_len >= 3) {
+        uint8_t calc_cs =
+            calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
+        if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
+          /* 校验失败，丢弃此帧 */
+        } else {
+          proto_send(usart0_rx_buffer[2]);
+        }
+      }
     }
   }
 }
-
-// #include "gd32f3x0.h"
-// #include "stdio.h"
-// #include "systick.h"
-
-// #define delay_ms(x) delay_1ms(x)
-
-// void com_usart_init(void)
-// {
-//     rcu_periph_clock_enable(RCU_GPIOA);
-//     rcu_periph_clock_enable(RCU_USART0);
-
-//     gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_9);
-//     gpio_af_set(GPIOA, GPIO_AF_1, GPIO_PIN_10);
-
-//     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_9);
-//     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ,
-//     GPIO_PIN_9);
-
-//     gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_10);
-//     gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_10MHZ,
-//     GPIO_PIN_10);
-
-//     usart_deinit(USART0);
-//     usart_word_length_set(USART0, USART_WL_8BIT);
-//     usart_stop_bit_set(USART0, USART_STB_1BIT);
-//     usart_parity_config(USART0, USART_PM_NONE);
-//     usart_baudrate_set(USART0, 115200U);
-//     usart_receive_config(USART0, USART_RECEIVE_ENABLE);
-//     usart_transmit_config(USART0, USART_TRANSMIT_ENABLE);
-//     usart_enable(USART0);
-// }
-
-// void timer_config(void)
-// {
-//     timer_parameter_struct timer_initpara;
-
-//     rcu_periph_clock_enable(RCU_TIMER1);
-//     timer_deinit(TIMER1);
-
-//     timer_struct_para_init(&timer_initpara);
-//     timer_initpara.prescaler = 8400 - 1;
-//     timer_initpara.alignedmode = TIMER_COUNTER_EDGE;
-//     timer_initpara.counterdirection = TIMER_COUNTER_UP;
-//     timer_initpara.period = 10000 - 1;
-//     timer_initpara.clockdivision = TIMER_CKDIV_DIV1;
-//     timer_initpara.repetitioncounter = 0;
-//     timer_init(TIMER1, &timer_initpara);
-
-//     timer_interrupt_enable(TIMER1, TIMER_INT_UP);
-//     nvic_irq_enable(TIMER1_IRQn, 0, 1);
-//     timer_enable(TIMER1);
-// }
-
-// volatile uint32_t timer_count = 0;
-
-// void TIMER1_IRQHandler(void)
-// {
-//     if (timer_interrupt_flag_get(TIMER1, TIMER_INT_FLAG_UP) == SET)
-//     {
-//         timer_interrupt_flag_clear(TIMER1, TIMER_INT_FLAG_UP);
-//         timer_count++;
-//     }
-// }
-
-// void main(void)
-// {
-//     systick_config();
-
-//     printf("Step 1: Initializing USART...\n");
-//     com_usart_init();
-//     printf("Step 2: USART init done!\n");
-
-//     printf("Step 3: Initializing TIMER1...\n");
-//     timer_config();
-//     printf("Step 4: TIMER1 init done!\n");
-
-//     printf("Step 5: Entering main loop...\n");
-//     while (1)
-//     {
-//         if (timer_count >= 100)
-//         {
-//             timer_count = 0;
-//             printf("Timer interrupt working! Count: %lu\n", timer_count);
-//         }
-//     }
-// }

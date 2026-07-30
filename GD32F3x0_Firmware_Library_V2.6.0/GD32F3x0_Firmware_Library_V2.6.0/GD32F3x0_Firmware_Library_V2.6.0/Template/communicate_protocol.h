@@ -18,6 +18,8 @@
 /* 外部声明 */
 extern void usart0_tx_dma_send(uint8_t *buf, uint16_t len);
 extern volatile uint8_t usart0_tx_busy;
+extern uint8_t usart0_rx_buffer[];
+extern volatile uint16_t usart0_rx_len;
 
 /* 缓冲区 */
 static uint8_t buf[256];
@@ -32,6 +34,7 @@ uint8_t calc_checksum(const uint8_t *data, uint16_t len) {
 }
 
 /*角度读取*/
+// 0x82
 void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
   uint16_t idx = 0;
 
@@ -57,9 +60,9 @@ void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
   buf[idx++] = (uint8_t)((uint16_t)(fabsf(yaw) * 100) & 0xFF);
 
   buf[idx++] = mag_disturb_flag ? 1 : 0; // if_mag_disturb_
-  buf[idx++] =
-      (uint8_t)((uint16_t)(icm_raw.temp * 100) >> 8); // 温度值，单位摄氏度
-  buf[idx++] = (uint8_t)((uint16_t)(icm_raw.temp * 100) & 0xFF);
+  // buf[idx++] =
+  //     (uint8_t)((uint16_t)(icm_raw.temp * 100) >> 8); // 温度值，单位摄氏度
+  // buf[idx++] = (uint8_t)((uint16_t)(icm_raw.temp * 100) & 0xFF);
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1); // 从 len_ 到最后一个数据字节数
   buf[1] = frame_len;                     // 填入 len_
@@ -73,6 +76,7 @@ void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
 }
 
 /*零位设置状态返回（协议格式同 angle_send）*/
+// 0x83
 void set_zero_angle() {
   uint16_t idx = 0;
 
@@ -100,6 +104,7 @@ void set_zero_angle() {
 }
 
 /*零位角度读取返回（返回安装基准零点 pitch_base/roll_base/yaw_base）*/
+// 0x84
 void zero_angle_read_send() {
   uint16_t idx = 0;
 
@@ -132,6 +137,76 @@ void zero_angle_read_send() {
   buf[idx++] = cs;
 
   // ---- DMA 发送 ----
+  usart0_tx_dma_send(buf, idx);
+}
+
+// 0x85偏转阈值设置
+/* 上位机帧头 0xAA，本机回复帧头 0x55 */
+static void threshold_set(void) {
+  uint8_t param;
+  float x_val, y_val, z_val;
+  int save_ok;
+  uint16_t idx;
+  uint8_t frame_len;
+  uint8_t cs;
+
+  // 解析接收帧：AA | 06 | 85 | param | X | Y | Z | cs
+  if (usart0_rx_len < 8)
+    return;
+
+  param = usart0_rx_buffer[3];
+  x_val = (float)usart0_rx_buffer[4];
+  y_val = (float)usart0_rx_buffer[5];
+  z_val = (float)usart0_rx_buffer[6];
+
+  // 校验范围 1°~90°
+  if (x_val < 1.0f || x_val > 90.0f || y_val < 1.0f || y_val > 90.0f ||
+      z_val < 1.0f || z_val > 90.0f) {
+    return;
+  }
+
+  if (param == 0x00) {
+    roll_mild_threshold = x_val;
+    pitch_mild_threshold = y_val;
+    yaw_mild_threshold = z_val;
+    if (roll_severe_threshold > 0.0f &&
+        roll_mild_threshold >= roll_severe_threshold)
+      return;
+    if (pitch_severe_threshold > 0.0f &&
+        pitch_mild_threshold >= pitch_severe_threshold)
+      return;
+    if (yaw_severe_threshold > 0.0f &&
+        yaw_mild_threshold >= yaw_severe_threshold)
+      return;
+    save_ok = save_alarm_config();
+  } else if (param == 0x01) {
+    roll_severe_threshold = x_val;
+    pitch_severe_threshold = y_val;
+    yaw_severe_threshold = z_val;
+    if (roll_mild_threshold > 0.0f &&
+        roll_severe_threshold <= roll_mild_threshold)
+      return;
+    if (pitch_mild_threshold > 0.0f &&
+        pitch_severe_threshold <= pitch_mild_threshold)
+      return;
+    if (yaw_mild_threshold > 0.0f && yaw_severe_threshold <= yaw_mild_threshold)
+      return;
+    save_ok = save_alarm_config();
+  } else {
+    return;
+  }
+
+  // 回复帧：55 | 04 | 85 | param | status | cs
+  idx = 0;
+  buf[idx++] = 0x55;
+  buf[idx++] = 0;
+  buf[idx++] = 0x85;
+  buf[idx++] = param;
+  buf[idx++] = (save_ok == 1) ? 0x00 : 0x01;
+  frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+  cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
   usart0_tx_dma_send(buf, idx);
 }
 
@@ -169,22 +244,22 @@ void mag_strength_read_send() {
 
   // mag_norm 整数值
   uint16_t mag_val = (uint16_t)(mag_raw.mag_norm);
-  buf[idx++] = (uint8_t)(mag_val >> 8);
-  buf[idx++] = (uint8_t)(mag_val & 0xFF);
+  buf[idx++] = (uint8_t)(mag_val * 100 >> 8);
+  buf[idx++] = (uint8_t)(mag_val * 100 & 0xFF);
 
-  // 三轴分量：先乘100保留两位小数，再转 int16
-  int16_t mx_i = (int16_t)(mag_raw.mx * 100.0f);
-  int16_t my_i = (int16_t)(mag_raw.my * 100.0f);
-  int16_t mz_i = (int16_t)(mag_raw.mz * 100.0f);
-  buf[idx++] = (mx_i < 0) ? 0x80 : 0x00;
-  buf[idx++] = (uint8_t)((uint16_t)(mx_i < 0 ? -mx_i : mx_i) >> 8);
-  buf[idx++] = (uint8_t)((uint16_t)(mx_i < 0 ? -mx_i : mx_i) & 0xFF);
-  buf[idx++] = (my_i < 0) ? 0x80 : 0x00;
-  buf[idx++] = (uint8_t)((uint16_t)(my_i < 0 ? -my_i : my_i) >> 8);
-  buf[idx++] = (uint8_t)((uint16_t)(my_i < 0 ? -my_i : my_i) & 0xFF);
-  buf[idx++] = (mz_i < 0) ? 0x80 : 0x00;
-  buf[idx++] = (uint8_t)((uint16_t)(mz_i < 0 ? -mz_i : mz_i) >> 8);
-  buf[idx++] = (uint8_t)((uint16_t)(mz_i < 0 ? -mz_i : mz_i) & 0xFF);
+  // // 三轴分量：先乘100保留两位小数，再转 int16
+  // int16_t mx_i = (int16_t)(mag_raw.mx * 100.0f);
+  // int16_t my_i = (int16_t)(mag_raw.my * 100.0f);
+  // int16_t mz_i = (int16_t)(mag_raw.mz * 100.0f);
+  // buf[idx++] = (mx_i < 0) ? 0x80 : 0x00;
+  // buf[idx++] = (uint8_t)((uint16_t)(mx_i < 0 ? -mx_i : mx_i) >> 8);
+  // buf[idx++] = (uint8_t)((uint16_t)(mx_i < 0 ? -mx_i : mx_i) & 0xFF);
+  // buf[idx++] = (my_i < 0) ? 0x80 : 0x00;
+  // buf[idx++] = (uint8_t)((uint16_t)(my_i < 0 ? -my_i : my_i) >> 8);
+  // buf[idx++] = (uint8_t)((uint16_t)(my_i < 0 ? -my_i : my_i) & 0xFF);
+  // buf[idx++] = (mz_i < 0) ? 0x80 : 0x00;
+  // buf[idx++] = (uint8_t)((uint16_t)(mz_i < 0 ? -mz_i : mz_i) >> 8);
+  // buf[idx++] = (uint8_t)((uint16_t)(mz_i < 0 ? -mz_i : mz_i) & 0xFF);
 
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1);
@@ -244,25 +319,134 @@ void heartbeat_send() {
   usart0_tx_dma_send(buf, idx);
 }
 
-/*自动上报（轮询发送 + 心跳，非阻塞降频）*/
+/*读取偏转阈值返回（cmd 0x86）*/
+/* 上位机帧头 0xAA，本机回复帧头 0x55 */
+/* 接收：AA | 03 | 86 | param | cs          (param=0x00轻微 0x01严重) */
+/* 回复：55 | 06 | 86 | param | X | Y | Z | cs */
+static void threshold_read_send(void) {
+  uint16_t idx;
+  uint8_t param;
+  uint8_t frame_len;
+  uint8_t cs;
+
+  param = usart0_rx_buffer[3];
+
+  idx = 0;
+  buf[idx++] = 0x55;
+  buf[idx++] = 0;
+  buf[idx++] = 0x86;
+  buf[idx++] = param;
+
+  if (param == 0x00) {
+    buf[idx++] = (uint8_t)roll_mild_threshold;
+    buf[idx++] = (uint8_t)pitch_mild_threshold;
+    buf[idx++] = (uint8_t)yaw_mild_threshold;
+  } else if (param == 0x01) {
+    buf[idx++] = (uint8_t)roll_severe_threshold;
+    buf[idx++] = (uint8_t)pitch_severe_threshold;
+    buf[idx++] = (uint8_t)yaw_severe_threshold;
+  }
+
+  frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+  cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+  usart0_tx_dma_send(buf, idx);
+}
+
+/*偏转预警时间设置（cmd 0x88）*/
+/* 上位机帧头 0xAA，本机回复帧头 0x55 */
+/* 接收：AA | 05 | 88 | 00 | time_H | time_L | cs */
+/* 回复：55 | 04 | 88 | 00 | status | cs */
+static void warning_time_set(void) {
+  uint16_t time_sec;
+  int save_ok;
+  uint16_t idx;
+  uint8_t frame_len;
+  uint8_t cs;
+
+  if (usart0_rx_len < 7)
+    return;
+
+  time_sec = (usart0_rx_buffer[4] << 8) | usart0_rx_buffer[5];
+
+  if (time_sec < 1 || time_sec > 3600)
+    return;
+
+  alarm_warning_time = time_sec;
+  save_ok = save_alarm_config();
+
+  idx = 0;
+  buf[idx++] = 0x55;
+  buf[idx++] = 0;
+  buf[idx++] = 0x88;
+  buf[idx++] = 0x00;
+  buf[idx++] = (save_ok == 1) ? 0x00 : 0x01;
+  frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+  cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+  usart0_tx_dma_send(buf, idx);
+}
+
+/*读取偏转预警时间返回（cmd 0x89）*/
+/* 上位机帧头 0xAA，本机回复帧头 0x55 */
+/* 接收：AA | 03 | 89 | 00 | cs */
+/* 回复：55 | 05 | 89 | 00 | time_H | time_L | cs */
+static void warning_time_read_send(void) {
+  uint16_t idx = 0;
+  uint8_t frame_len;
+  uint8_t cs;
+
+  buf[idx++] = 0x55;
+  buf[idx++] = 0;
+  buf[idx++] = 0x89;
+  buf[idx++] = 0x00;
+  buf[idx++] = (uint8_t)(alarm_warning_time >> 8);
+  buf[idx++] = (uint8_t)(alarm_warning_time & 0xFF);
+
+  frame_len = (uint8_t)(idx - 1);
+  buf[1] = frame_len;
+  cs = calc_checksum(&buf[1], frame_len);
+  buf[idx++] = cs;
+  usart0_tx_dma_send(buf, idx);
+}
+
 void proto_send(uint8_t cmd) {
   if (usart0_tx_busy) {
     return;
   }
 
-  static uint8_t seq = 0;
-  switch (seq) {
-  case 0:
+  switch (cmd) {
+  case 0x82:
     angle_send(att.pitch, att.roll, att.yaw_now, mag_disturb_flag);
     break;
-  case 1:
-    heartbeat_send();
+  case 0x83:
+    set_zero_angle();
     break;
-  case 2:
+  case 0x84:
+    zero_angle_read_send();
+    break;
+  case 0x85:
+    threshold_set();
+    break;
+  case 0x86:
+    threshold_read_send();
+    break;
+  case 0x87:
+    alarm_status_read_send();
+    break;
+  case 0x88:
+    warning_time_set();
+    break;
+  case 0x89:
+    warning_time_read_send();
+    break;
+  case 0x8A:
     mag_strength_read_send();
     break;
+  case 0x8D:
+    active_report_ack_send();
+    break;
   }
-  seq++;
-  if (seq >= 3)
-    seq = 0;
 }
