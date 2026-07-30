@@ -722,6 +722,9 @@ def build_figure(records: list[Frame], cmd: int, file_name: str = "") -> tuple[p
     field_names = []
     for r in cmd_records:
         for name in r.fields:
+            # 跳过 Raw 字段（二进制 hex 数据，不适合绘图）
+            if name == "Raw":
+                continue
             if name not in field_names:
                 field_names.append(name)
 
@@ -738,7 +741,15 @@ def build_figure(records: list[Frame], cmd: int, file_name: str = "") -> tuple[p
     x_full = np.array([r.rel_time for r in cmd_records])
     lines: dict[str, plt.Line2D] = {}
     for idx, name in enumerate(field_names):
-        y_full = np.array([r.fields.get(name) for r in cmd_records], dtype=float)
+        # 安全转换：无法转为 float 的值设为 NaN，避免中断绘图
+        y_values = []
+        for r in cmd_records:
+            val = r.fields.get(name)
+            try:
+                y_values.append(float(val) if val is not None else float('nan'))
+            except (ValueError, TypeError):
+                y_values.append(float('nan'))
+        y_full = np.array(y_values, dtype=float)
         x_disp, y_disp = _decimate_for_display(x_full, y_full)
         color = COLORS[idx % len(COLORS)]
         line, = ax.plot(x_disp, y_disp, label=name, color=color, linewidth=1.3)

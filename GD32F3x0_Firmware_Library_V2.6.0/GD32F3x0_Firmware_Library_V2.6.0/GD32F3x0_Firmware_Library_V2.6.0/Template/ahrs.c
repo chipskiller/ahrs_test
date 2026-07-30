@@ -178,7 +178,7 @@ void ahrs_calc_6axis(ahrs_t *self, float ax, float ay, float az,
       return;
     }
   }
-
+  // 减去偏移值后的陀螺仪数值
   float gx_comp = gx - self->gx_bias;
   float gy_comp = gy - self->gy_bias;
   float gz_comp = gz - self->gyro_bias.gz_bias;
