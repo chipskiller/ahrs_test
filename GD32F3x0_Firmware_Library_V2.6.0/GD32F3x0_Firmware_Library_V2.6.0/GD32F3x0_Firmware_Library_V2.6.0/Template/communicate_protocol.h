@@ -243,9 +243,9 @@ void mag_strength_read_send() {
   buf[idx++] = 0x00; // 读取参数
 
   // mag_norm 整数值
-  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm);
-  buf[idx++] = (uint8_t)(mag_val * 100 >> 8);
-  buf[idx++] = (uint8_t)(mag_val * 100 & 0xFF);
+  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm*100.0f); // 先乘100保留两位小数，再转 uint16
+  buf[idx++] = (uint8_t)(mag_val  >> 8);
+  buf[idx++] = (uint8_t)(mag_val  & 0xFF);
 
   // // 三轴分量：先乘100保留两位小数，再转 int16
   // int16_t mx_i = (int16_t)(mag_raw.mx * 100.0f);
