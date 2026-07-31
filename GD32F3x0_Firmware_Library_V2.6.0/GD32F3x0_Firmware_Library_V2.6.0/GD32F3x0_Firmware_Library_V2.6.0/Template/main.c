@@ -208,12 +208,14 @@ static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg) {
  */
 void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
                          float gz, float temp) {
-  static uint8_t first_run = 1;
-  static float gx_bias = 0.0f, gy_bias = 0.0f;
-  static float gx_sum = 0.0f, gy_sum = 0.0f, gz_sum = 0.0f;
-  static uint16_t init_cnt = 0;
-  static float ix = 0.0f, iy = 0.0f, iz = 0.0f;
+  // ====== 阶段0：静态变量（跨调用保持状态） ======
+  static uint8_t first_run = 1; // 首次运行标志，触发初始对准
+  static float gx_bias = 0.0f, gy_bias = 0.0f; // 陀螺零偏估计值（在线校准）
+  static float gx_sum = 0.0f, gy_sum = 0.0f, gz_sum = 0.0f; // 初始对准累加器
+  static uint16_t init_cnt = 0;                 // 初始对准采样计数
+  static float ix = 0.0f, iy = 0.0f, iz = 0.0f; // Mahony PI 控制器积分项
 
+  // ====== 阶段1：初始对准（前200次采样，约2秒） ======
   if (first_run) {
     gx_sum += gx;
     gy_sum += gy;
@@ -221,17 +223,20 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     init_cnt++;
 
     if (init_cnt >= 200) {
+      // 200次采样完成，求均值作为陀螺静态零偏
       gx_bias = gx_sum / 200.0f;
       gy_bias = gy_sum / 200.0f;
       gyro_bias.gz_bias = gz_sum / 200.0f;
       gyro_bias.temp_ref = temp;
 
+      // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
       float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
       float accel_roll = atan2f(ay, az) * 57.3f;
       euler_to_quat(accel_pitch, accel_roll, 0.0f);
 
       first_run = 0;
     } else {
+      // 初始化未完成，仅输出加速度计姿态，不积分
       float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
       float accel_roll = atan2f(ay, az) * 57.3f;
       att.pitch = accel_pitch;
@@ -241,62 +246,78 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     }
   }
 
+  // ====== 阶段2：陀螺零偏补偿 ======
   float gx_comp = gx - gx_bias;
   float gy_comp = gy - gy_bias;
   float gz_comp = gz - gyro_bias.gz_bias;
-
-  static uint16_t stable_cnt = 0;
-  uint8_t is_stable = (fabsf(gx_comp) < 2.0f) && (fabsf(gy_comp) < 2.0f) &&
+  // ====== 阶段3：静止检测 ======
+  static uint16_t stable_cnt = 0;                // 连续静止采样计数
+  uint8_t is_stable = (fabsf(gx_comp) < 2.0f) && // 三轴角速度均 < 2°/s
+                      (fabsf(gy_comp) < 2.0f) && // 判定为静止状态
                       (fabsf(gz_comp) < 2.0f);
-
+  // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
+  // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
     stable_cnt++;
   } else {
     stable_cnt = 0;
+    // 运动时清零 Mahony 积分项，防止积分饱和
     ix = 0.0f;
     iy = 0.0f;
     iz = 0.0f;
   }
 
+  // ====== 阶段4：陀螺积分 → 四元数增量（一阶龙格库塔法） ======
   float q0 = quat.w, q1 = quat.x, q2 = quat.y, q3 = quat.z;
 
-  float gx_rad = gx_comp * 0.0174533f;
+  float gx_rad = gx_comp * 0.0174533f; // °/s → rad/s
   float gy_rad = gy_comp * 0.0174533f;
   float gz_rad = gz_comp * 0.0174533f;
 
-  float half_dt = DT * 0.5f;
+  float half_dt = DT * 0.5f; // 半采样周期
 
+  // 四元数微分方程: dq/dt = 0.5 * q ⊗ ω
   float dq0 = (-q1 * gx_rad - q2 * gy_rad - q3 * gz_rad) * half_dt;
   float dq1 = (q0 * gx_rad + q2 * gz_rad - q3 * gy_rad) * half_dt;
   float dq2 = (q0 * gy_rad - q1 * gz_rad + q3 * gx_rad) * half_dt;
   float dq3 = (q0 * gz_rad + q1 * gy_rad - q2 * gx_rad) * half_dt;
 
+  // ====== 阶段5：加速度计 Mahony 互补滤波修正（仅修正 pitch/roll） ======
   float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
+  // 条件：连续静止 > 100ms 且加速度模长接近 1g（排除剧烈运动干扰）
   if (stable_cnt > 10 && acc_norm > 0.85f && acc_norm < 1.15f) {
-    float ax_n = ax / acc_norm;
+    float ax_n = ax / acc_norm; // 归一化加速度
     float ay_n = ay / acc_norm;
     float az_n = az / acc_norm;
 
+    // 从当前四元数提取重力方向在机体坐标系下的投影（理论值）
     float vx = 2.0f * (q1 * q3 - q0 * q2);
     float vy = 2.0f * (q0 * q1 + q2 * q3);
     float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 
+    // 叉积求姿态误差：加速度实测值 × 四元数估计值
     float ex = ay_n * vz - az_n * vy;
     float ey = az_n * vx - ax_n * vz;
     float ez = ax_n * vy - ay_n * vx;
 
-    const float Kp = 0.5f;
-    const float Ki = 0.001f;
-
+    // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
+    const float Kp = 2.0f;   // 比例增益 0.5
+    const float Ki = 0.005f; // 积分增益 0.001
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
 
+    printf("yaw = %.2f, pitch = %.2f, roll = %.2f, ex = %.4f, ey = %.4f, ez = "
+           "%.4f,ix = %.4f,iy = %.4f,iz = %.4f\r\n",
+           att.yaw_now, att.pitch, att.roll, ex, ey, ez, ix, iy, iz);
+           
+    // 将修正量叠加到四元数增量（d3 修正 pitch/roll，不修正 yaw）
     dq1 += (ex * Kp + ix) * half_dt;
     dq2 += (ey * Kp + iy) * half_dt;
     dq3 += (ez * Kp + iz) * half_dt;
   }
 
+  // ====== 阶段6：更新四元数并归一化 ======
   quat.w += dq0;
   quat.x += dq1;
   quat.y += dq2;
@@ -304,17 +325,23 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   quat_normalize();
 
+  // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
   if (stable_cnt > 100) {
+    // 指数滑动平均跟踪零偏漂移，时间常数 τ ≈ 10s
     gx_bias = gx_bias * 0.999f + gx * 0.001f;
     gy_bias = gy_bias * 0.999f + gy * 0.001f;
     gyro_bias.gz_bias = gyro_bias.gz_bias * 0.999f + gz * 0.001f;
+    // printf("is_stable=%d, gx_bias=%.2f, gy_bias=%.2f, gz_bias=%.2f\r\n",
+    //        is_stable, gx_bias, gy_bias, gyro_bias.gz_bias);
   }
 
+  // ====== 阶段8：四元数 → 欧拉角输出 ======
   q0 = quat.w;
   q1 = quat.x;
   q2 = quat.y;
   q3 = quat.z;
 
+  // 重力方向在机体坐标系下的投影
   float vx = 2.0f * (q1 * q3 - q0 * q2);
   float vy = 2.0f * (q0 * q1 + q2 * q3);
   float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
@@ -322,12 +349,17 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   att.pitch = -atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
   att.roll = -atan2f(vy, vz) * 57.3f;
 
+  // 航向角纯陀螺积分（6轴模式无磁力计修正）
   att.yaw_now += gz_comp * DT;
 
-  while (att.yaw_now > 180.0f)
+  // 角度归一化到 [-180°, 180°]
+  while (att.yaw_now > 180.0f) {
     att.yaw_now -= 360.0f;
-  while (att.yaw_now < -180.0f)
+  }
+
+  while (att.yaw_now < -180.0f) {
     att.yaw_now += 360.0f;
+  }
 }
 
 /**
@@ -759,16 +791,16 @@ int main(void) {
     }
     // 处理串口数据（空闲中断已计算 usart0_rx_len）
     if (usart0_rx_flag) {
-      usart0_rx_flag = 0;
-      if (usart0_rx_len >= 3) {
-        uint8_t calc_cs =
-            calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
-        if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
-          /* 校验失败，丢弃此帧 */
-        } else {
-          proto_send(usart0_rx_buffer[2]);
-        }
-      }
+      // usart0_rx_flag = 0;
+      // if (usart0_rx_len >= 3) {
+      //   uint8_t calc_cs =
+      //       calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
+      //   if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
+      //     /* 校验失败，丢弃此帧 */
+      //   } else {
+      //     proto_send(usart0_rx_buffer[2]);
+      //   }
+      // }
     }
   }
 }
