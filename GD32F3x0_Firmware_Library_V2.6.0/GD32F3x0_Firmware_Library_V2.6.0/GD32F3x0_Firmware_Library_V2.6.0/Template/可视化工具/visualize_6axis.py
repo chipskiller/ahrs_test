@@ -43,6 +43,18 @@ import numpy as np
 import os
 os.environ.pop("MPLBACKEND", None)  # 清除 VSCode 可能注入的环境变量
 
+# 修复：PyQt5 安装在包含非 ASCII 字符（中文）的路径下时（如 ...\Desktop\项目\...），
+# Qt 无法自动定位 Windows 平台插件，报错：
+#   qt.qpa.plugin: Could not find the Qt platform plugin "windows" in ""
+# 这里根据 PyQt5 实际安装位置显式指定插件目录，必须在 QApplication 创建之前设置。
+try:
+    import PyQt5 as _pyqt5
+    _plugins_dir = os.path.join(os.path.dirname(_pyqt5.__file__), "Qt5", "plugins")
+    if os.path.isdir(_plugins_dir):
+        os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", _plugins_dir)
+except ImportError:
+    pass  # 未安装 PyQt5 时忽略（脚本会在后续步骤提示）
+
 import matplotlib
 _backends_tried = []
 for _be in ["QtAgg", "Qt5Agg", "TkAgg"]:
