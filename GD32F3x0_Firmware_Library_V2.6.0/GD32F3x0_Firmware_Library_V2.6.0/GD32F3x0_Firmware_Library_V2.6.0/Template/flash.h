@@ -14,7 +14,8 @@ extern "C" {
 #define FLASH_ZONE_B      0x0800FD00U  /* 姿态零点备份 B（第 63 页） */
 #define FLASH_GYRO_BIAS   0x0800FE00U  /* 陀螺零偏（第 63 页） */
 #define FLASH_ALARM_CFG   0x0800F800U  /* 报警参数（第 62 页） */
-#define FLASH_YAW_PAGE    0x0800EC00U  /* 航向环形缓冲（第 59 页，预留） */
+#define FLASH_YAW_PAGE    0x0800EC00U  /* 航向环形缓冲（第 59 页） */
+#define FLASH_YAW_SLOTS   256U         /* 每页可存 256 个 float */
 
 /* ========== 报警参数结构体 ========== */
 
@@ -52,6 +53,10 @@ void load_install_zero_point(void);
 /* 报警参数（保存 / 加载） */
 int  save_alarm_config(void);
 void load_alarm_config(void);
+
+/* 航向角断电保存（环形缓冲，每 10ms 调用一次） */
+void save_yaw_to_flash(float current_yaw);
+void load_yaw_from_flash(void);
 
 #ifdef __cplusplus
 }

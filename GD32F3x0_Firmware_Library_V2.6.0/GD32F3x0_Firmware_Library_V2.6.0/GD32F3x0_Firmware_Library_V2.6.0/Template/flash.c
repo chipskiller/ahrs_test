@@ -174,3 +174,82 @@ void load_alarm_config(void) {
     alarm_warning_time     = cfg.warning_time;
   }
 }
+
+/* ========== 航向角断电保存（环形缓冲） ========== */
+
+void save_yaw_to_flash(float current_yaw) {
+  static uint32_t tick_cnt  = 0;   /* 调用次数，每 10ms +1 */
+  static float    last_yaw  = 0.0f; /* 上次写入时的 yaw 值 */
+  static uint16_t write_idx = 0;   /* 下次写入的槽位号 */
+  static uint8_t  first_run = 1;    /* 首次调用标记 */
+
+  tick_cnt++;
+
+  /* 首次调用：扫描当前页找到第一个空槽和最后一个有效槽 */
+  if (first_run) {
+    first_run = 0;
+    uint16_t i;
+    for (i = 0; i < FLASH_YAW_SLOTS; i++) {
+      uint32_t val = *((volatile uint32_t *)(FLASH_YAW_PAGE + i * 4));
+      if (val == 0xFFFFFFFFU) break;
+    }
+    write_idx = i;
+    if (write_idx > 0) {
+      last_yaw = *((volatile float *)(FLASH_YAW_PAGE + (write_idx - 1) * 4));
+    }
+  }
+
+  /* 判断是否需要写入 */
+  float    delta   = fabsf(current_yaw - last_yaw);
+  uint32_t tick_60 = 6000U;   /* 60 秒 = 6000 次 × 10ms */
+  uint32_t tick_300 = 30000U; /* 300 秒 = 30000 次 */
+
+  uint8_t need_write = 0;
+  if (tick_cnt >= tick_60 && delta > 10.0f) {
+    need_write = 1;
+  } else if (tick_cnt >= tick_300) {
+    need_write = 1;
+  }
+
+  if (!need_write) return;
+
+  tick_cnt = 0;
+
+  /* 槽位写满 → 整页擦除，从头开始 */
+  if (write_idx >= FLASH_YAW_SLOTS) {
+    fmc_unlock();
+    fmc_page_erase(FLASH_YAW_PAGE);
+    fmc_lock();
+    write_idx = 0;
+  }
+
+  /* 写入当前 yaw 到空槽（无需擦除，word_program 即可） */
+  uint32_t raw;
+  memcpy(&raw, &current_yaw, 4);
+  fmc_unlock();
+  fmc_word_program(FLASH_YAW_PAGE + write_idx * 4, raw);
+  fmc_lock();
+
+  last_yaw  = current_yaw;
+  write_idx++;
+}
+
+void load_yaw_from_flash(void) {
+  /* 从页尾向前扫描，找到第一个非 0xFFFFFFFF 的槽 */
+  int16_t i;
+  for (i = (int16_t)(FLASH_YAW_SLOTS - 1); i >= 0; i--) {
+    uint32_t val = *((volatile uint32_t *)(FLASH_YAW_PAGE + i * 4));
+    if (val != 0xFFFFFFFFU) {
+      float saved_yaw;
+      memcpy(&saved_yaw, &val, 4);
+
+      /* 合法性校验 */
+      if (!isnan(saved_yaw) && saved_yaw >= -180.0f && saved_yaw <= 180.0f) {
+        att.yaw_now  = saved_yaw;
+        att.yaw_base = saved_yaw;
+      }
+      return;
+    }
+  }
+  /* 整页为空（首次上电），不修改 att */
+}

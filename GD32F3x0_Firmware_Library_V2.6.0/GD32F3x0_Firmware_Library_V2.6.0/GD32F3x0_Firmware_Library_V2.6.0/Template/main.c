@@ -2,10 +2,10 @@
 #include "communicate_protocol.h"
 #include "gd32f3x0.h"
 #include "math.h"
+#include "soft_i2c.h"
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
-#include "soft_i2c.h"
 #include <stdint.h>
 
 #define delay_ms(x) delay_1ms(x)
@@ -21,8 +21,8 @@
 #define I2C_TIMEOUT 10000U // I2C通信超时计数
 
 // 采样与报警配置
-#define DT 0.01f                    // 10ms采样周期 100Hz
-#define MAG_DISTURB_THRESH 120.0f   // 地磁突变判定阈值
+#define DT 0.01f                  // 10ms采样周期 100Hz
+#define MAG_DISTURB_THRESH 120.0f // 地磁突变判定阈值
 
 /************************ 全局数据结构体 ************************/
 
@@ -148,7 +148,7 @@ void qmc5883p_get_raw_data(void) {
   int16_t my_raw = (buf[3] << 8) | buf[2];
   int16_t mz_raw = (buf[5] << 8) | buf[4];
 
-  mag_raw.mx = mx_raw / 2048.0f;  /* 转换为高斯 */
+  mag_raw.mx = mx_raw / 2048.0f; /* 转换为高斯 */
   mag_raw.my = my_raw / 2048.0f;
   mag_raw.mz = mz_raw / 2048.0f;
   mag_raw.mag_norm = sqrtf(mag_raw.mx * mag_raw.mx + mag_raw.my * mag_raw.my +
@@ -418,8 +418,14 @@ void imu_main_loop(uint8_t rtc_hour) {
   // 采集传感器原始数据
   icm42670_get_raw_data();
   qmc5883p_get_raw_data();
-  // 检测前后地磁向量模长，参数值判断磁场是否被干扰
-  mag_disturb_detect();
+  static int16_t loop_cnt = 0;
+  loop_cnt++;
+  if (loop_cnt % 10 == 0) {
+    // 检测前后地磁向量模长，参数值判断磁场是否被干扰
+    mag_disturb_detect();
+  } else {
+    loop_cnt = 0;
+  }
 
   // 分时姿态解算
   //   if (day_mode == 1)
@@ -461,6 +467,9 @@ void imu_main_loop(uint8_t rtc_hour) {
     alarm_filter_cnt = 0;
     fault_type = 0x00;
   }
+
+  // 航向角断电保存（环形缓冲，内部自动判断写入时机）
+  save_yaw_to_flash(att.yaw_now);
 }
 
 /************************ 系统总初始化入口 ************************/
@@ -593,18 +602,18 @@ void usart0_rx_dma_idle_init(void) {
   nvic_irq_enable(USART0_IRQn, 1, 0);
 
   /* 清除开机时 USART 可能已收到的脏数据 */
-  delay_1ms(5);                         // 等 USART 线稳定
+  delay_1ms(5); // 等 USART 线稳定
   volatile uint8_t dummy;
   for (int i = 0; i < 16; i++) {
-    dummy = USART_RDATA(USART0);        // 读走残留字节
+    dummy = USART_RDATA(USART0); // 读走残留字节
   }
   (void)dummy;
   usart_flag_clear(USART0, USART_FLAG_IDLE);
   usart_interrupt_flag_clear(USART0, USART_INT_FLAG_IDLE);
-  memset(usart0_rx_buffer, 0, USART0_RX_BUF_SIZE);  // 清空 DMA 缓冲区
+  memset(usart0_rx_buffer, 0, USART0_RX_BUF_SIZE); // 清空 DMA 缓冲区
   usart0_rx_len = 0;
   usart0_rx_flag = 0;
-  dma_transfer_number_config(DMA_CH2, USART0_RX_BUF_SIZE);  // 复位 DMA 计数器
+  dma_transfer_number_config(DMA_CH2, USART0_RX_BUF_SIZE); // 复位 DMA 计数器
 }
 
 /************************ USART0 DMA 发送 ************************/
