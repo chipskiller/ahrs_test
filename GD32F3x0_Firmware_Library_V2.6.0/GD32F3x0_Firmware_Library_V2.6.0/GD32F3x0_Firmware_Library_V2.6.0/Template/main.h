@@ -44,6 +44,7 @@ OF SUCH DAMAGE.
 #define MAIN_H
 
 #include <stdint.h>
+#include "flash.h"
 
 typedef struct {
   float w, x, y, z;
@@ -96,19 +97,7 @@ extern uint8_t mag_disturb_flag;         // 地磁受大车干扰标记
 extern uint8_t fault_type;               // 偏转报警类型标记
 // extern uint16_t alarm_filter_cnt; // 报警防抖计数器
 extern uint32_t stable_cnt;
-// extern volatile uint8_t imu_loop_flag; // 定时器中断标志
-
-extern float roll_mild_threshold;
-extern float pitch_mild_threshold;
-extern float yaw_mild_threshold;
-extern float roll_severe_threshold;
-extern float pitch_severe_threshold;
-extern float yaw_severe_threshold;
-extern uint16_t alarm_warning_time;
 
 void imu_main_loop(uint8_t rtc_hour);
-int save_install_zero_point(void);
-int save_alarm_config(void);
-void load_alarm_config(void);
 
 #endif /* MAIN_H */
