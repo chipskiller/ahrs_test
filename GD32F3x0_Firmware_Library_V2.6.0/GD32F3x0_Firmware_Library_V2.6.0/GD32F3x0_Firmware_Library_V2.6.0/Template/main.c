@@ -232,7 +232,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
       // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
       float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
       float accel_roll = atan2f(ay, az) * 57.3f;
-      euler_to_quat(accel_pitch, accel_roll, 0.0f);
+      euler_to_quat(accel_pitch, accel_roll, att.yaw_now);
 
       first_run = 0;
     } else {
@@ -241,7 +241,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
       float accel_roll = atan2f(ay, az) * 57.3f;
       att.pitch = accel_pitch;
       att.roll = accel_roll;
-      att.yaw_now = 0.0f;
+      att.yaw_now = att.yaw_now;
       return;
     }
   }
@@ -301,15 +301,15 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     float ez = ax_n * vy - ay_n * vx;
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
-    const float Kp = 2.0f;   // 比例增益 0.5
-    const float Ki = 0.005f; // 积分增益 0.001
+    const float Kp = 1.0f;   // 比例增益 0.5
+    const float Ki = 0.01f; // 积分增益 0.001
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
 
-    printf("yaw = %.2f, pitch = %.2f, roll = %.2f, ex = %.4f, ey = %.4f, ez = "
-           "%.4f,ix = %.4f,iy = %.4f,iz = %.4f\r\n",
-           att.yaw_now, att.pitch, att.roll, ex, ey, ez, ix, iy, iz);
+    // printf("yaw = %.4f, pitch = %.4f, roll = %.4f, ex = %.4f, ey = %.4f, ez = "
+    //        "%.4f,ix = %.4f,iy = %.4f,iz = %.4f\r\n",
+    //        att.yaw_now, att.pitch, att.roll, ex, ey, ez, ix, iy, iz);
            
     // 将修正量叠加到四元数增量（d3 修正 pitch/roll，不修正 yaw）
     dq1 += (ex * Kp + ix) * half_dt;
@@ -514,6 +514,7 @@ void imu_system_init(void) {
   qmc5883p_init();
   load_install_zero_point(); // 上电加载安装标定零点
   load_alarm_config();       // 上电加载报警参数
+  load_yaw_from_flash();     // 上电恢复断电前航向角
 }
 
 // ## 外部补充初始化说明（需要自行添加）
@@ -781,7 +782,7 @@ int main(void) {
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
-        // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
+        printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
