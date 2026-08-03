@@ -225,7 +225,7 @@ void save_yaw_to_flash(float current_yaw) {
     fmc_page_erase(FLASH_YAW_PAGE);
     fmc_lock();
     write_idx = 0;
-    printf("[YAW-FLASH] page erased, restart from slot 0\r\n");
+    // printf("[YAW-FLASH] page erased, restart from slot 0\r\n");
   }
 
   /* 写入当前 yaw 到空槽（无需擦除，word_program 即可） */
@@ -237,13 +237,13 @@ void save_yaw_to_flash(float current_yaw) {
 
   /* 回读校验写入是否成功 */
   uint32_t verify = *((volatile uint32_t *)(FLASH_YAW_PAGE + write_idx * 4));
-  if (verify == raw) {
-    printf("[YAW-FLASH] write OK slot=%u yaw=%.2f delta=%.2f\r\n", write_idx,
-           current_yaw, delta);
-  } else {
-    printf("[YAW-FLASH] write FAIL slot=%u wrote=0x%08lX read=0x%08lX\r\n",
-           write_idx, raw, verify);
-  }
+  // if (verify == raw) {
+  //   printf("[YAW-FLASH] write OK slot=%u yaw=%.2f delta=%.2f\r\n", write_idx,
+  //          current_yaw, delta);
+  // } else {
+  //   printf("[YAW-FLASH] write FAIL slot=%u wrote=0x%08lX read=0x%08lX\r\n",
+  //          write_idx, raw, verify);
+  // }
 
   last_yaw = current_yaw;
   write_idx++;

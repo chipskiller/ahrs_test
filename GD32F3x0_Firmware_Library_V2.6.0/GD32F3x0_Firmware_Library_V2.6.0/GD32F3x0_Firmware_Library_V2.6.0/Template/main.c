@@ -779,8 +779,8 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 100 == 0) {
-        // proto_send(usart0_rx_buffer[2]);
+      if (debug_cnt % 1000 == 0) {
+        proto_send(0x82);
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
