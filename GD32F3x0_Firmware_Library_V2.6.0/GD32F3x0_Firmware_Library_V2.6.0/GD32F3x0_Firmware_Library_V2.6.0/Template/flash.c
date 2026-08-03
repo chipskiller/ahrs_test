@@ -213,8 +213,9 @@ void save_yaw_to_flash(float current_yaw) {
     need_write = 1;
   }
 
-  if (!need_write)
+  if (!need_write || tick_cnt < 100) {
     return;
+  }
 
   tick_cnt = 0;
 
@@ -237,8 +238,8 @@ void save_yaw_to_flash(float current_yaw) {
   /* 回读校验写入是否成功 */
   uint32_t verify = *((volatile uint32_t *)(FLASH_YAW_PAGE + write_idx * 4));
   if (verify == raw) {
-    printf("[YAW-FLASH] write OK slot=%u yaw=%.2f delta=%.2f\r\n",
-           write_idx, current_yaw, delta);
+    printf("[YAW-FLASH] write OK slot=%u yaw=%.2f delta=%.2f\r\n", write_idx,
+           current_yaw, delta);
   } else {
     printf("[YAW-FLASH] write FAIL slot=%u wrote=0x%08lX read=0x%08lX\r\n",
            write_idx, raw, verify);
@@ -263,8 +264,8 @@ void load_yaw_from_flash(void) {
         att.yaw_base = saved_yaw;
         printf("[YAW-FLASH] load OK slot=%d yaw=%.2f\r\n", i, saved_yaw);
       } else {
-        printf("[YAW-FLASH] load FAIL slot=%d invalid value=%.2f\r\n",
-               i, saved_yaw);
+        printf("[YAW-FLASH] load FAIL slot=%d invalid value=%.2f\r\n", i,
+               saved_yaw);
       }
       return;
     }
