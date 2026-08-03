@@ -7,15 +7,28 @@
 extern "C" {
 #endif
 
-/* ========== Flash 分区（GD32F330, 每页 1024 字节） ========== */
+/* ========== Flash 分区（GD32F330, 每页 1024 字节，共 64 页） ========== */
+/*
+  0x08000000 - 0x08000FFF  Bootloader (4KB, 第 0-3 页)
+  0x08001000 - 0x08007FFF  App 运行区 (32KB, 第 4-11 页)
+  0x08008000 - 0x0800DFFF  下载区/OTA (24KB, 第 12-19 页)
+  0x0800E000 - 0x0801FFFF  数据分区 (~80KB, 第 20-63 页) — OTA 不碰
+*/
 
 #define FLASH_PAGE_SIZE   1024U
-#define FLASH_ZONE_A      0x0800FC00U  /* 姿态零点备份 A（第 63 页） */
-#define FLASH_ZONE_B      0x0800FD00U  /* 姿态零点备份 B（第 63 页） */
-#define FLASH_GYRO_BIAS   0x0800FE00U  /* 陀螺零偏（第 63 页） */
-#define FLASH_ALARM_CFG   0x0800F800U  /* 报警参数（第 62 页） */
-#define FLASH_YAW_PAGE    0x0800EC00U  /* 航向环形缓冲（第 59 页） */
+#define FLASH_ZONE_A      0x0801FC00U  /* 姿态零点备份 A（第 63 页） */
+#define FLASH_ZONE_B      0x0801FD00U  /* 姿态零点备份 B（第 63 页） */
+#define FLASH_GYRO_BIAS   0x0801FE00U  /* 陀螺零偏（第 63 页） */
+#define FLASH_ALARM_CFG   0x0801F800U  /* 报警参数（第 62 页） */
+#define FLASH_YAW_PAGE    0x0800E000U  /* 航向环形缓冲（第 20 页） */
 #define FLASH_YAW_SLOTS   256U         /* 每页可存 256 个 float */
+
+/* ========== OTA 分区（ota_protocol.c 使用） ========== */
+#define APP_START_ADDR      0x08001000U  /* App 区起始（第 4 页） */
+#define APP_END_ADDR        0x08007FFFU  /* App 区结束（第 11 页） */
+#define DOWNLOAD_START_ADDR 0x08008000U  /* 下载区起始（第 12 页） */
+#define DOWNLOAD_SIZE       0x00006000U  /* 下载区大小 24KB（第 12-19 页） */
+#define DATA_ZONE_START     0x0800E000U  /* 数据分区起始（第 20 页），OTA 不碰 */
 
 /* ========== 报警参数结构体 ========== */
 

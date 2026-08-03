@@ -2,6 +2,7 @@
 #include "communicate_protocol.h"
 #include "gd32f3x0.h"
 #include "math.h"
+#include "ota_protocol.h"
 #include "soft_i2c.h"
 #include "stdio.h"
 #include "string.h"
@@ -798,12 +799,21 @@ int main(void) {
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
       if (usart0_rx_len >= 3) {
-        uint8_t calc_cs =
-            calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
-        if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
-          /* 校验失败，丢弃此帧 */
+        /* OTA 协议帧头为 0xAA，业务协议帧头为 0x55（回复）或其他 */
+        if (usart0_rx_buffer[0] == 0xAA) {
+          /* OTA 远程烧录协议 */
+          for (uint16_t i = 0; i < usart0_rx_len; i++) {
+            ota_protocol_parse(usart0_rx_buffer[i]);
+          }
         } else {
-          proto_send(usart0_rx_buffer[2]);
+          /* 原有业务协议 */
+          uint8_t calc_cs =
+              calc_checksum(usart0_rx_buffer + 1, usart0_rx_len - 2);
+          if (calc_cs != usart0_rx_buffer[usart0_rx_len - 1]) {
+            /* 校验失败，丢弃此帧 */
+          } else {
+            proto_send(usart0_rx_buffer[2]);
+          }
         }
       }
     }
