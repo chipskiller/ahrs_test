@@ -302,7 +302,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
     const float Kp = 3.0f;  // 比例增益 0.5
-    const float Ki = 0.02f; // 积分增益 0.001
+    const float Ki = 0.1f; // 积分增益 0.001
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
@@ -341,18 +341,20 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   att.roll = -atan2f(vy, vz) * 57.3f;
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
-  if (stable_cnt > 500) {
+  if (stable_cnt > 100) {
     // 指数滑动平均跟踪零偏漂移，时间常数 τ ≈ 10s
 
-    gx_bias = gx_bias * 0.99f + gx * 0.01f;
-    gy_bias = gy_bias * 0.99f + gy * 0.01f;
-    gyro_bias.gz_bias = gyro_bias.gz_bias * 0.99f + gz * 0.01f;
+    gx_bias = gx_bias * 0.9f + gx * 0.1f;
+    gy_bias = gy_bias * 0.9f + gy * 0.1f;
+    gyro_bias.gz_bias = gyro_bias.gz_bias * 0.9f + gz * 0.1f;
+  }
     // printf("is_stable=%d, gx_bias=%.2f, gy_bias=%.2f, gz_bias=%.2f\r\n",
     //        is_stable, gx_bias, gy_bias, gyro_bias.gz_bias);
-  } else {
-    // 航向角纯陀螺积分（6轴模式无磁力计修正）
-    att.yaw_now += gz_comp * DT;
-  }
+  // } else {
+  //   // 航向角纯陀螺积分（6轴模式无磁力计修正）
+  //   att.yaw_now += gz_comp * DT;
+  // }
+  att.yaw_now += gz_comp * DT;
 
   // 角度归一化到 [-180°, 180°]
   while (att.yaw_now > 180.0f) {
