@@ -207,7 +207,7 @@ void save_yaw_to_flash(float current_yaw) {
   uint32_t tick_300 = 30000U; /* 300 秒 = 30000 次 */
 
   uint8_t need_write = 0;
-  if (tick_cnt >= tick_60 && delta > 10.0f) {
+  if (tick_cnt >= tick_60 || delta > 1.0f) {
     need_write = 1;
   } else if (tick_cnt >= tick_300) {
     need_write = 1;

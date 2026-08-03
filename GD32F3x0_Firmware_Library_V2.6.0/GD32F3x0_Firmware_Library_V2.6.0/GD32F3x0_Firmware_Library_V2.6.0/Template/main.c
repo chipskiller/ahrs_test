@@ -215,18 +215,18 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static uint16_t init_cnt = 0;                 // 初始对准采样计数
   static float ix = 0.0f, iy = 0.0f, iz = 0.0f; // Mahony PI 控制器积分项
 
-  // ====== 阶段1：初始对准（前200次采样，约2秒） ======
+  // ====== 阶段1：初始对准（前100次采样，约1秒） ======
   if (first_run) {
     gx_sum += gx;
     gy_sum += gy;
     gz_sum += gz;
     init_cnt++;
 
-    if (init_cnt >= 200) {
-      // 200次采样完成，求均值作为陀螺静态零偏
-      gx_bias = gx_sum / 200.0f;
-      gy_bias = gy_sum / 200.0f;
-      gyro_bias.gz_bias = gz_sum / 200.0f;
+    if (init_cnt >= 100) {
+      // 100次采样完成，求均值作为陀螺静态零偏
+      gx_bias = gx_sum / 100.0f;
+      gy_bias = gy_sum / 100.0f;
+      gyro_bias.gz_bias = gz_sum / 100.0f;
       gyro_bias.temp_ref = temp;
 
       // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
@@ -252,9 +252,9 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float gz_comp = gz - gyro_bias.gz_bias;
   // ====== 阶段3：静止检测 ======
   static uint16_t stable_cnt = 0;                // 连续静止采样计数
-  uint8_t is_stable = (fabsf(gx_comp) < 2.0f) && // 三轴角速度均 < 2°/s
-                      (fabsf(gy_comp) < 2.0f) && // 判定为静止状态
-                      (fabsf(gz_comp) < 2.0f);
+  uint8_t is_stable = (fabsf(gx_comp) < 1.0f) && // 三轴角速度均 < 2°/s
+                      (fabsf(gy_comp) < 1.0f) && // 判定为静止状态
+                      (fabsf(gz_comp) < 1.0f);
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
@@ -301,8 +301,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     float ez = ax_n * vy - ay_n * vx;
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
-    const float Kp = 1.0f;  // 比例增益 0.5
-    const float Ki = 0.01f; // 积分增益 0.001
+    const float Kp = 3.0f;  // 比例增益 0.5
+    const float Ki = 0.02f; // 积分增益 0.001
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
