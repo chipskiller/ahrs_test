@@ -201,17 +201,13 @@ void save_yaw_to_flash(float current_yaw) {
       last_yaw = *((volatile float *)(FLASH_YAW_PAGE + (write_idx - 1) * 4));
     }
   }
-  float delta;
-  /* 判断是否需要写入 */
-  if (tick_cnt == 100) {
-    delta = fabsf(current_yaw - last_yaw);
-  }
+  float delta = fabsf(current_yaw - last_yaw);
 
   uint32_t tick_60 = 6000U;   /* 60 秒 = 6000 次 × 10ms */
   uint32_t tick_300 = 30000U; /* 300 秒 = 30000 次 */
 
   uint8_t need_write = 0;
-  if (tick_cnt >= tick_60 || delta > 2.0f) {
+  if (tick_cnt >= tick_60 && delta > 10.0f) {
     need_write = 1;
   } else if (tick_cnt >= tick_300) {
     need_write = 1;
