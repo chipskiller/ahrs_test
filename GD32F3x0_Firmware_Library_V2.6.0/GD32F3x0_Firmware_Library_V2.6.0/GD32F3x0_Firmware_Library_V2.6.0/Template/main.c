@@ -222,11 +222,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     gz_sum += gz;
     init_cnt++;
 
-    if (init_cnt >= 100) {
+    if (init_cnt >= 500) {
       // 100次采样完成，求均值作为陀螺静态零偏
-      gx_bias = gx_sum / 100.0f;
-      gy_bias = gy_sum / 100.0f;
-      gyro_bias.gz_bias = gz_sum / 100.0f;
+      gx_bias = gx_sum / 500.0f;
+      gy_bias = gy_sum / 500.0f;
+      gyro_bias.gz_bias = gz_sum / 500.0f;
       gyro_bias.temp_ref = temp;
 
       // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
@@ -285,7 +285,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   // ====== 阶段5：加速度计 Mahony 互补滤波修正（仅修正 pitch/roll） ======
   float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
   // 条件：连续静止 > 100ms 且加速度模长接近 1g（排除剧烈运动干扰）
-  if (stable_cnt > 10 && acc_norm > 0.85f && acc_norm < 1.15f) {
+  if (stable_cnt > 10 && acc_norm > 0.9f && acc_norm < 1.1f) {
     float ax_n = ax / acc_norm; // 归一化加速度
     float ay_n = ay / acc_norm;
     float az_n = az / acc_norm;
@@ -301,13 +301,13 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     float ez = ax_n * vy - ay_n * vx;
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
-    const float Kp = 100.0f; // 比例增益 0.5
-    const float Ki = 5.0f;   // 积分增益 0.001
+    const float Kp = 25.0f; // 比例增益 0.5
+    const float Ki = 0.3f;   // 积分增益 0.001
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
 
-    // printf(" ez = %.4f, iz = %.4f, yaw=%.5f, gz_bias=%.5f\r\n", ez, iz, att.yaw_now, gyro_bias.gz_bias);
+    printf(" ez = %.4f, iz = %.4f, yaw=%.5f, gz_bias=%.5f\r\n", ez, iz, att.yaw_now, gyro_bias.gz_bias);
 
     // 将修正量叠加到四元数增量（d3 修正 pitch/roll，不修正 yaw）
     dq1 += (ex * Kp + ix) * half_dt;
@@ -338,19 +338,19 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   att.roll = -atan2f(vy, vz) * 57.3f;
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
-  if (stable_cnt > 100) {
+  if (stable_cnt > 200) {
     // 指数滑动平均跟踪零偏漂移，时间常数 τ ≈ 10s
 
-    gx_bias = gx_bias * 0.9f + gx * 0.1f;
-    gy_bias = gy_bias * 0.9f + gy * 0.1f;
-    gyro_bias.gz_bias = gyro_bias.gz_bias * 0.8f + gz * 0.2f;
+    gx_bias = gx_bias * 0.99f + gx * 0.01f;
+    gy_bias = gy_bias * 0.99f + gy * 0.01f;
+    gyro_bias.gz_bias = gyro_bias.gz_bias * 0.99f + gz * 0.01f;
     // }
 
   } else {
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
-    att.yaw_now += gz_comp * DT;
+    // att.yaw_now += gz_comp * DT;
   }
-  // att.yaw_now += gz_comp * DT;
+  att.yaw_now += gz_comp * DT;
   // printf("is_stable=%d, yaw=%.5f, gz_bias=%.5f\r\n", is_stable, att.yaw_now,
   //        gyro_bias.gz_bias);
   // 角度归一化到 [-180°, 180°]
@@ -783,7 +783,7 @@ int main(void) {
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
-        printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
+        // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
         // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
         //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
