@@ -3,7 +3,7 @@
 #include "gd32f3x0.h"
 #include "math.h"
 #include "ota_protocol.h"
-#include "soft_i2c.h"
+#include "hard_i2c.h"
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
@@ -16,8 +16,8 @@
 #define ICM42670_ADDR 0x68
 #define QMC5883P_ADDR 0x2c
 
-#define I2C_IMU I2C0       // ICM42670挂载I2C0 (PA0/PA1)
-#define I2C_MAG I2C0       // 磁力计挂载I2C0
+#define I2C_IMU I2C1       // ICM42670挂载I2C1 (PA0/PA1)
+#define I2C_MAG I2C1       // 磁力计挂载I2C1
 #define USART_RS485 USART1 // RS485上报串口
 #define I2C_TIMEOUT 10000U // I2C通信超时计数
 
@@ -757,8 +757,8 @@ int main(void) {
   // usart_interrupt_enable(USART0, USART_INT_TBE);
   // printf("hello_word");
   /* configure RCU */
-  /* I2C 软模拟初始化（soft_i2c_init 内部已配置 GPIO 和时钟） */
-  soft_i2c_init();
+  /* I2C1 硬件初始化（hard_i2c_init 内部已配置 GPIO 和 I2C1 外设） */
+  hard_i2c_init();
   // printf("I2C init done!\n");
 
   // i2c_test();
