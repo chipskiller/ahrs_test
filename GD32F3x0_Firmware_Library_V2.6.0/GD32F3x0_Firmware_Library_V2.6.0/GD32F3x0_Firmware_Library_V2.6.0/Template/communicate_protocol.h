@@ -1,6 +1,6 @@
 #include "gd32f3x0_usart.h"
 #include "main.h"
-#include "soft_i2c.h"
+#include "hard_i2c.h"
 #include "stdint.h"
 #include <math.h>
 #include <stdio.h>
@@ -307,8 +307,8 @@ void heartbeat_send() {
   buf[idx++] = counter++; // 心跳计数（每帧+1，溢出自动归零）
 
   /* 探测 I2C 从设备是否在线（0=在线，1=离线）*/
-  buf[idx++] = soft_i2c_probe(0x68); // IMU(ICM42670) 状态
-  buf[idx++] = soft_i2c_probe(0x2C); // MAG(QMC5883P) 状态
+  buf[idx++] = hard_i2c_probe(0x68); // IMU(ICM42670) 状态
+  buf[idx++] = hard_i2c_probe(0x2C); // MAG(QMC5883P) 状态
 
   uint8_t frame_len = (uint8_t)(idx - 1);
   buf[1] = frame_len;

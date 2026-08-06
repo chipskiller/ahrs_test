@@ -2,7 +2,7 @@
 #include "communicate_protocol.h"
 #include "gd32f3x0.h"
 #include "math.h"
-#include "soft_i2c.h"
+#include "hard_i2c.h"
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
@@ -15,10 +15,10 @@
 #define ICM42670_ADDR 0x68
 #define QMC5883P_ADDR 0x2c
 
-#define I2C_IMU I2C0       // ICM42670挂载I2C0 (PA0/PA1)
-#define I2C_MAG I2C0       // 磁力计挂载I2C0
+#define I2C_IMU I2C1       // ICM42670挂载I2C1 (PA0/PA1)
+#define I2C_MAG I2C1       // 磁力计挂载I2C1
 #define USART_RS485 USART1 // RS485上报串口
-#define I2C_TIMEOUT 10000U // I2C通信超时计数
+#define I2C_TIMEOUT 10000U // I2C通信超时计数（与hard_i2c.h保持一致）
 
 // 采样与报警配置
 #define DT 0.01f                  // 10ms采样周期 100Hz
@@ -57,26 +57,45 @@ volatile uint16_t usart0_rx_len = 0;
 volatile uint8_t usart0_rx_flag = 0;
 
 /************************ ICM42670 驱动函数 ************************/
+/* 软I2C助手函数前向声明（定义在文件后部，供icm42670_init提前调用） */
+static void diag_scl(uint8_t level);
+static void diag_sda(uint8_t level);
+static uint8_t diag_sda_in(void);
+static void diag_start(void);
+static void diag_stop(void);
+static uint8_t diag_send_byte(uint8_t byte);
+// static uint8_t diag_read_byte(uint8_t ack_bit);  /* 诊断用，已注释 */
+static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data);
 /**
  * @brief ICM42670芯片初始化
+ * @note 硬件I2C对0x75(WHO_AM_I)读会时钟拉伸挂起（软I2C诊断已确认器件正常，ID=0x67），
+ *       故此处改用软I2C写配置寄存器，配完后恢复硬件I2C引脚供主循环读数据。
  */
 void icm42670_init(void) {
-  uint8_t who_am_i;
+  printf("ICM42670 init: via soft-I2C ...\r\n");
 
-  who_am_i = i2c_reg_read(I2C_IMU, ICM42670_ADDR, 0x75);
+  /* 切换到软I2C（GPIO开漏）模式 */
+  gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_0 | GPIO_PIN_1);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0 | GPIO_PIN_1);
+  diag_scl(1); diag_sda(1);
+  delay_1ms(2);
 
-  if (who_am_i != 0x67) {
-    return;
-  }
-
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x00);
+  diag_reg_write(0x68, 0x1F, 0x00);
   delay_ms(100);
 
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x0F);
+  diag_reg_write(0x68, 0x1F, 0x0F);
   delay_ms(30);
 
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x21, 0x68);
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x20, 0x68);
+  diag_reg_write(0x68, 0x21, 0x68);
+  diag_reg_write(0x68, 0x20, 0x68);
+
+  /* 恢复硬件I2C引脚(AF4)，供主循环/后续硬件I2C使用 */
+  gpio_af_set(GPIOA, GPIO_AF_4, GPIO_PIN_0);
+  gpio_af_set(GPIOA, GPIO_AF_4, GPIO_PIN_1);
+  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_0 | GPIO_PIN_1);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0 | GPIO_PIN_1);
+
+  printf("ICM42670 init done\r\n");
 }
 
 /**
@@ -252,9 +271,9 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float gz_comp = gz - gyro_bias.gz_bias;
   // ====== 阶段3：静止检测 ======
   static uint16_t stable_cnt = 0;                 // 连续静止采样计数
-  uint8_t is_stable = (fabsf(gx_comp) < 0.35f) && // 三轴角速度均 < 2°/s
-                      (fabsf(gy_comp) < 0.35f) && // 判定为静止状态
-                      (fabsf(gz_comp) < 0.35f);
+  uint8_t is_stable = (fabsf(gx_comp) < 0.6f) && // 三轴角速度均 < 2°/s
+                      (fabsf(gy_comp) < 0.6f) && // 判定为静止状态
+                      (fabsf(gz_comp) < 0.6f);
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
@@ -307,7 +326,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     iy += ey * Ki;
     iz += ez * Ki;
 
-    printf(" ez = %.4f, iz = %.4f, yaw=%.5f, gz_bias=%.5f\r\n", ez, iz, att.yaw_now, gyro_bias.gz_bias);
+    // printf(" ez = %.4f, iz = %.4f, yaw=%.5f, gz_bias=%.5f\r\n", ez, iz, att.yaw_now, gyro_bias.gz_bias);
 
     // 将修正量叠加到四元数增量（d3 修正 pitch/roll，不修正 yaw）
     dq1 += (ex * Kp + ix) * half_dt;
@@ -348,9 +367,9 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   } else {
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
-    // att.yaw_now += gz_comp * DT;
+    att.yaw_now += gz_comp * DT;
   }
-  att.yaw_now += gz_comp * DT;
+  // att.yaw_now += gz_comp * DT;
   // printf("is_stable=%d, yaw=%.5f, gz_bias=%.5f\r\n", is_stable, att.yaw_now,
   //        gyro_bias.gz_bias);
   // 角度归一化到 [-180°, 180°]
@@ -741,9 +760,93 @@ void timer_config(void) {
   timer_enable(TIMER1);
 }
 
+/************************ 软I2C诊断（验证0x68器件用，确认后可删除） ************************/
+static void diag_scl(uint8_t level) {
+  if (level) gpio_bit_set(GPIOA, GPIO_PIN_0); else gpio_bit_reset(GPIOA, GPIO_PIN_0);
+}
+static void diag_sda(uint8_t level) {
+  if (level) gpio_bit_set(GPIOA, GPIO_PIN_1); else gpio_bit_reset(GPIOA, GPIO_PIN_1);
+}
+static uint8_t diag_sda_in(void) {
+  return gpio_input_bit_get(GPIOA, GPIO_PIN_1);
+}
+static void diag_start(void) {
+  diag_sda(1); diag_scl(1); delay_us(5);
+  diag_sda(0); delay_us(5);
+  diag_scl(0); delay_us(5);
+}
+static void diag_stop(void) {
+  diag_sda(0); diag_scl(1); delay_us(5);
+  diag_sda(1); delay_us(5);
+}
+static uint8_t diag_send_byte(uint8_t byte) {
+  uint8_t i, ack;
+  for (i = 0; i < 8; i++) {
+    diag_scl(0); delay_us(3);
+    if (byte & 0x80) diag_sda(1); else diag_sda(0);
+    delay_us(2); diag_scl(1); delay_us(5);
+    byte <<= 1;
+  }
+  diag_scl(0); delay_us(3);
+  diag_sda(1); delay_us(2);
+  diag_scl(1); delay_us(5);
+  ack = diag_sda_in();            /* 0=器件拉低SDA=ACK, 1=NACK */
+  diag_scl(0); delay_us(5);
+  return (ack == 0) ? 0 : 1;
+}
+/* 诊断用读字节函数，已注释
+static uint8_t diag_read_byte(uint8_t ack_bit) {
+  uint8_t i, byte = 0;
+  diag_sda(1);
+  for (i = 0; i < 8; i++) {
+    diag_scl(0); delay_us(5);
+    diag_scl(1); delay_us(3);
+    byte <<= 1;
+    if (diag_sda_in()) byte |= 0x01;
+    delay_us(2);
+  }
+  diag_scl(0); delay_us(3);
+  if (ack_bit) diag_sda(0); else diag_sda(1);
+  delay_us(2); diag_scl(1); delay_us(5);
+  diag_scl(0); delay_us(5);
+  return byte;
+}
+*/
+static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data) {
+  diag_start();
+  diag_send_byte(dev << 1);
+  diag_send_byte(reg);
+  diag_send_byte(data);
+  diag_stop();
+}
+/* 开机软I2C读WHO_AM_I诊断（调试用，已注释，正式运行不需要） */
+// static void soft_i2c_whoami_diag(void) {
+//   uint8_t ack_w, ack_reg, ack_r, who;
+//
+//   printf("\r\n[DIAG] Soft-I2C read WHO_AM_I: dev=0x68 reg=0x75 ...\r\n");
+//
+//   gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_0 | GPIO_PIN_1);
+//   gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ, GPIO_PIN_0 | GPIO_PIN_1);
+//   diag_scl(1); diag_sda(1);
+//   delay_1ms(2);
+//
+//   diag_start();
+//   ack_w   = diag_send_byte(0x68 << 1);       /* 写地址 0xD0 */
+//   ack_reg = diag_send_byte(0x75);            /* 寄存器 0x75 */
+//   diag_start();                              /* RESTART */
+//   ack_r   = diag_send_byte((0x68 << 1) | 1); /* 读地址 0xD1 */
+//   who = diag_read_byte(0);                   /* 读1字节 + NACK */
+//   diag_stop();
+//
+//   printf("[DIAG] ACK: addrW=%s reg=%s addrR=%s | WHO_AM_I=0x%02X %s\r\n",
+//          ack_w ? "NACK" : "ACK", ack_reg ? "NACK" : "ACK", ack_r ? "NACK" : "ACK",
+//          who, (who == 0x67) ? "(OK 0x67)" : "(NOT 0x67!)");
+// }
+
 int main(void) {
   systick_config();
   com_usart_init();
+  // soft_i2c_whoami_diag();   /* 开机软I2C读WHO_AM_I诊断：调试用，正式运行注释掉 */
   // printf("Hellow word!\n");
   // sprintf(transmitter_buffer, "HELLO_world!\n");
   // usart_interrupt_enable(USART0, USART_INT_TBE);
@@ -753,8 +856,18 @@ int main(void) {
   // usart_interrupt_enable(USART0, USART_INT_TBE);
   // printf("hello_word");
   /* configure RCU */
-  /* I2C 软模拟初始化（soft_i2c_init 内部已配置 GPIO 和时钟） */
-  soft_i2c_init();
+  /* I2C1 硬件初始化（hard_i2c_init 内部已配置 GPIO 和 I2C1 外设） */
+  hard_i2c_init();
+  
+  /* I2C总线扫描 - 检测设备是否存在（调试用，正式运行注释掉）
+  printf("=== I2C Bus Scan ===\n");
+  for(uint8_t addr = 0x08; addr <= 0x77; addr++) {
+    if(hard_i2c_probe(addr) == 0) {
+      printf("  Device found at 7-bit addr: 0x%02X (8-bit: 0x%02X)\n", addr, addr << 1);
+    }
+  }
+  printf("=== Scan Done ===\n");
+  */
   // printf("I2C init done!\n");
 
   // i2c_test();
@@ -778,8 +891,8 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
-      if (debug_cnt % 5 == 0) {
-        // proto_send(0x82);
+      if (debug_cnt % 1000 == 0) {
+        proto_send(0x82);
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
