@@ -12,11 +12,7 @@ extern "C" {
 #define HARD_I2C_SDA_PIN GPIO_PIN_1
 #define HARD_I2C_PORT    GPIOA
 #define HARD_I2C_PERIPH  I2C1
-<<<<<<< HEAD
-#define HARD_I2C_SPEED   400000  /* 400kHz 快速模式 */
-=======
 #define HARD_I2C_SPEED   100000  /* 100kHz 标准模式（与soft_i2c一致） */
->>>>>>> mainmain
 
 /* I2C 超时计数 */
 #define I2C_TIMEOUT 10000U

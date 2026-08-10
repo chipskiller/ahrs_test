@@ -3,11 +3,7 @@
 #include "gd32f3x0.h"
 #include "hard_i2c.h"
 #include "math.h"
-<<<<<<< HEAD
 #include "ota_protocol.h"
-#include "hard_i2c.h"
-=======
->>>>>>> mainmain
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
@@ -973,8 +969,6 @@ int main(void) {
   /* configure RCU */
   /* I2C1 硬件初始化（hard_i2c_init 内部已配置 GPIO 和 I2C1 外设） */
   hard_i2c_init();
-<<<<<<< HEAD
-=======
 
   /* I2C总线扫描 - 检测设备是否存在（调试用，正式运行注释掉）
   printf("=== I2C Bus Scan ===\n");
@@ -986,7 +980,6 @@ int main(void) {
   }
   printf("=== Scan Done ===\n");
   */
->>>>>>> mainmain
   // printf("I2C init done!\n");
 
   // i2c_test();
