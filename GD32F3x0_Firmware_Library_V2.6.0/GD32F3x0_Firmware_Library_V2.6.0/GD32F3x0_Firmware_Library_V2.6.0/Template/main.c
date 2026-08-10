@@ -1,9 +1,13 @@
 #include "main.h"
 #include "communicate_protocol.h"
 #include "gd32f3x0.h"
+#include "hard_i2c.h"
 #include "math.h"
+<<<<<<< HEAD
 #include "ota_protocol.h"
 #include "hard_i2c.h"
+=======
+>>>>>>> mainmain
 #include "stdio.h"
 #include "string.h"
 #include "systick.h"
@@ -19,7 +23,7 @@
 #define I2C_IMU I2C1       // ICM42670挂载I2C1 (PA0/PA1)
 #define I2C_MAG I2C1       // 磁力计挂载I2C1
 #define USART_RS485 USART1 // RS485上报串口
-#define I2C_TIMEOUT 10000U // I2C通信超时计数
+#define I2C_TIMEOUT 10000U // I2C通信超时计数（与hard_i2c.h保持一致）
 
 // 采样与报警配置
 #define DT 0.01f                  // 10ms采样周期 100Hz
@@ -58,26 +62,50 @@ volatile uint16_t usart0_rx_len = 0;
 volatile uint8_t usart0_rx_flag = 0;
 
 /************************ ICM42670 驱动函数 ************************/
+/* 软I2C助手函数前向声明（定义在文件后部，供icm42670_init提前调用） */
+static void diag_scl(uint8_t level);
+static void diag_sda(uint8_t level);
+static uint8_t diag_sda_in(void);
+static void diag_start(void);
+static void diag_stop(void);
+static uint8_t diag_send_byte(uint8_t byte);
+// static uint8_t diag_read_byte(uint8_t ack_bit);  /* 诊断用，已注释 */
+static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data);
 /**
  * @brief ICM42670芯片初始化
+ * @note
+ * 硬件I2C对0x75(WHO_AM_I)读会时钟拉伸挂起（软I2C诊断已确认器件正常，ID=0x67），
+ *       故此处改用软I2C写配置寄存器，配完后恢复硬件I2C引脚供主循环读数据。
  */
 void icm42670_init(void) {
-  uint8_t who_am_i;
+  printf("ICM42670 init: via soft-I2C ...\r\n");
 
-  who_am_i = i2c_reg_read(I2C_IMU, ICM42670_ADDR, 0x75);
+  /* 切换到软I2C（GPIO开漏）模式 */
+  gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP,
+                GPIO_PIN_0 | GPIO_PIN_1);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ,
+                          GPIO_PIN_0 | GPIO_PIN_1);
+  diag_scl(1);
+  diag_sda(1);
+  delay_1ms(2);
 
-  if (who_am_i != 0x67) {
-    return;
-  }
-
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x00);
+  diag_reg_write(0x68, 0x1F, 0x00);
   delay_ms(100);
 
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x1F, 0x0F);
+  diag_reg_write(0x68, 0x1F, 0x0F);
   delay_ms(30);
 
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x21, 0x68);
-  i2c_reg_write(I2C_IMU, ICM42670_ADDR, 0x20, 0x68);
+  diag_reg_write(0x68, 0x21, 0x68);
+  diag_reg_write(0x68, 0x20, 0x68);
+
+  /* 恢复硬件I2C引脚(AF4)，供主循环/后续硬件I2C使用 */
+  gpio_af_set(GPIOA, GPIO_AF_4, GPIO_PIN_0);
+  gpio_af_set(GPIOA, GPIO_AF_4, GPIO_PIN_1);
+  gpio_mode_set(GPIOA, GPIO_MODE_AF, GPIO_PUPD_PULLUP, GPIO_PIN_0 | GPIO_PIN_1);
+  gpio_output_options_set(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_50MHZ,
+                          GPIO_PIN_0 | GPIO_PIN_1);
+
+  printf("ICM42670 init done\r\n");
 }
 
 /**
@@ -90,16 +118,31 @@ void icm42670_get_raw_data(void) {
   int16_t ax_raw = (buf[0] << 8) | buf[1];
   int16_t ay_raw = (buf[2] << 8) | buf[3];
   int16_t az_raw = (buf[4] << 8) | buf[5];
-  icm_raw.ax = ax_raw / 16384.0f;
-  icm_raw.ay = ay_raw / 16384.0f;
-  icm_raw.az = az_raw / 16384.0f;
+  float ax_val = ax_raw / 16384.0f;
+  float ay_val = ay_raw / 16384.0f;
+  float az_val = az_raw / 16384.0f;
+
+  if (fabsf(ax_val) > 20.0f || fabsf(ay_val) > 20.0f || fabsf(az_val) > 20.0f) {
+    return;
+  }
 
   int16_t gx_raw = (buf[6] << 8) | buf[7];
   int16_t gy_raw = (buf[8] << 8) | buf[9];
   int16_t gz_raw = (buf[10] << 8) | buf[11];
-  icm_raw.gx = gx_raw / 131.072f;
-  icm_raw.gy = gy_raw / 131.072f;
-  icm_raw.gz = gz_raw / 131.072f;
+  float gx_val = gx_raw / 131.072f;
+  float gy_val = gy_raw / 131.072f;
+  float gz_val = gz_raw / 131.072f;
+
+  if (fabsf(gx_val) > 2500.0f || fabsf(gy_val) > 2500.0f ||
+      fabsf(gz_val) > 2500.0f) {
+    return;
+  }
+  icm_raw.ax = ax_val;
+  icm_raw.ay = ay_val;
+  icm_raw.az = az_val;
+  icm_raw.gx = gx_val;
+  icm_raw.gy = gy_val;
+  icm_raw.gz = gz_val;
 
   uint8_t temp_buf[2] = {0};
   i2c_reg_read_multi(I2C_IMU, ICM42670_ADDR, 0x09, temp_buf, 2);
@@ -185,18 +228,22 @@ static void quat_normalize(void) {
 }
 
 static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg) {
-  float p = pitch_deg * 0.0174533f * 0.5f;
-  float r = roll_deg * 0.0174533f * 0.5f;
-  float y = yaw_deg * 0.0174533f * 0.5f;
+  float p = pitch_deg * 0.0174533f * 0.5f; /* θ/2 */
+  float r = roll_deg * 0.0174533f * 0.5f;  /* φ/2 */
+  float y = yaw_deg * 0.0174533f * 0.5f;   /* ψ/2 */
 
   float cp = cosf(p), sp = sinf(p);
   float cr = cosf(r), sr = sinf(r);
   float cy = cosf(y), sy = sinf(y);
 
-  quat.w = cp * cr * cy + sp * sr * sy;
-  quat.x = sp * cr * cy - cp * sr * sy;
-  quat.y = cp * sr * cy + sp * cr * sy;
-  quat.z = cp * cr * sy - sp * sr * cy;
+  /* 标准ZYX四元数（q1=roll分量, q2=pitch分量），与 Mahony 修正和
+     四元数→欧拉角提取(vx/vy/vz)的约定保持一致。
+     原实现 q1/q2 反了，导致 Mahony 修正方向错误→姿态缓慢漂移→
+     累积到总倾斜90°时 roll 提取进入奇异点，跳到±180°来回振荡。 */
+  quat.w = cy * cp * cr + sy * sp * sr;
+  quat.x = cy * cp * sr - sy * sp * cr;
+  quat.y = cy * sp * cr + sy * cp * sr;
+  quat.z = sy * cp * cr - cy * sp * sr;
 
   quat_normalize();
 }
@@ -210,12 +257,14 @@ static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg) {
 void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
                          float gz, float temp) {
   // ====== 阶段0：静态变量（跨调用保持状态） ======
-  static uint8_t first_run = 1; // 首次运行标志，触发初始对准
+  static uint8_t first_run = 1;                // 首次运行标志，触发初始对准
   static float gx_bias = 0.0f, gy_bias = 0.0f; // 陀螺零偏估计值（在线校准）
   static float gx_sum = 0.0f, gy_sum = 0.0f, gz_sum = 0.0f; // 初始对准累加器
-  static uint16_t init_cnt = 0;                 // 初始对准采样计数
+  static uint16_t init_cnt = 0;                             // 初始对准采样计数
   static float ix = 0.0f, iy = 0.0f, iz = 0.0f; // Mahony PI 控制器积分项
-
+  static int temp_stable_cnt = 0;               // 温度稳定计数器
+  static float last_temp = 0.0f;                // 上次温度值
+  static int temp_diff_flag = 0;                // 温度变化标志
   // ====== 阶段1：初始对准（前100次采样，约1秒） ======
   if (first_run) {
     gx_sum += gx;
@@ -223,11 +272,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     gz_sum += gz;
     init_cnt++;
 
-    if (init_cnt >= 100) {
+    if (init_cnt >= 500) {
       // 100次采样完成，求均值作为陀螺静态零偏
-      gx_bias = gx_sum / 100.0f;
-      gy_bias = gy_sum / 100.0f;
-      gyro_bias.gz_bias = gz_sum / 100.0f;
+      gx_bias = gx_sum / 500.0f;
+      gy_bias = gy_sum / 500.0f;
+      gyro_bias.gz_bias = gz_sum / 500.0f;
       gyro_bias.temp_ref = temp;
 
       // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
@@ -253,9 +302,9 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float gz_comp = gz - gyro_bias.gz_bias;
   // ====== 阶段3：静止检测 ======
   static uint16_t stable_cnt = 0;                // 连续静止采样计数
-  uint8_t is_stable = (fabsf(gx_comp) < 1.0f) && // 三轴角速度均 < 2°/s
-                      (fabsf(gy_comp) < 1.0f) && // 判定为静止状态
-                      (fabsf(gz_comp) < 1.0f);
+  uint8_t is_stable = (fabsf(gx_comp) < 0.6f) && // 三轴角速度均 < 2°/s
+                      (fabsf(gy_comp) < 0.6f) && // 判定为静止状态
+                      (fabsf(gz_comp) < 0.6f);
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
@@ -270,6 +319,35 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   // ====== 阶段4：陀螺积分 → 四元数增量（一阶龙格库塔法） ======
   float q0 = quat.w, q1 = quat.x, q2 = quat.y, q3 = quat.z;
+
+  // ====== 阶段4.1：反演锁死检测与恢复 ======
+  // 若估计重力 v 与实测重力 a 方向相反（点积<0），说明滤波器锁死在 180°
+  // 倒立解（ 叉积误差在 180°
+  // 处为0，拉不回来）。此时用加速度计重新初始化四元数，立即拉回正确姿态。
+  // 仅当加速度模长≈1g 时判定，避免剧烈运动误触发。
+  {
+    float acc_norm_chk = sqrtf(ax * ax + ay * ay + az * az);
+    if (acc_norm_chk > 0.9f && acc_norm_chk < 1.1f) {
+      float ax_n = ax / acc_norm_chk, ay_n = ay / acc_norm_chk,
+            az_n = az / acc_norm_chk;
+      float vx_c = 2.0f * (q1 * q3 - q0 * q2);
+      float vy_c = 2.0f * (q0 * q1 + q2 * q3);
+      float vz_c = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
+      if (vx_c * ax_n + vy_c * ay_n + vz_c * az_n < 0.0f) {
+        /* 反演锁死：用加速度计重新初始化四元数，保持当前 yaw */
+        float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
+        float accel_roll = atan2f(ay, az) * 57.3f;
+        euler_to_quat(accel_pitch, accel_roll, att.yaw_now);
+        ix = 0.0f;
+        iy = 0.0f;
+        iz = 0.0f; /* 清积分项 */
+        q0 = quat.w;
+        q1 = quat.x;
+        q2 = quat.y;
+        q3 = quat.z; /* 用新四元数继续 */
+      }
+    }
+  }
 
   float gx_rad = gx_comp * 0.0174533f; // °/s → rad/s
   float gy_rad = gy_comp * 0.0174533f;
@@ -286,7 +364,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   // ====== 阶段5：加速度计 Mahony 互补滤波修正（仅修正 pitch/roll） ======
   float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
   // 条件：连续静止 > 100ms 且加速度模长接近 1g（排除剧烈运动干扰）
-  if (stable_cnt > 10 && acc_norm > 0.85f && acc_norm < 1.15f) {
+  if (stable_cnt > 10 && acc_norm > 0.9f && acc_norm < 1.1f) {
     float ax_n = ax / acc_norm; // 归一化加速度
     float ay_n = ay / acc_norm;
     float az_n = az / acc_norm;
@@ -302,16 +380,29 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     float ez = ax_n * vy - ay_n * vx;
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
-    const float Kp = 3.0f;  // 比例增益 0.5
-    const float Ki = 0.1f; // 积分增益 0.001
+    const float Kp = 20.0f; // 比例增益 0.5
+    const float Ki = 0.001f;  // 积分增益 0.001
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
 
-    // printf("yaw = %.4f, pitch = %.4f, roll = %.4f, ex = %.4f, ey = %.4f, ez =
-    // "
-    //        "%.4f,ix = %.4f,iy = %.4f,iz = %.4f\r\n",
-    //        att.yaw_now, att.pitch, att.roll, ex, ey, ez, ix, iy, iz);
+    // 积分限幅：防止积分项饱和后把姿态推跑（自激翻滚的诱因之一）
+    const float I_LIMIT = 0.5f;
+    if (ix > I_LIMIT)
+      ix = I_LIMIT;
+    else if (ix < -I_LIMIT)
+      ix = -I_LIMIT;
+    if (iy > I_LIMIT)
+      iy = I_LIMIT;
+    else if (iy < -I_LIMIT)
+      iy = -I_LIMIT;
+    if (iz > I_LIMIT)
+      iz = I_LIMIT;
+    else if (iz < -I_LIMIT)
+      iz = -I_LIMIT;
+
+    // printf(" ez = %.4f, iz = %.4f, yaw=%.5f, gz_bias=%.5f\r\n", ez, iz,
+    // att.yaw_now, gyro_bias.gz_bias);
 
     // 将修正量叠加到四元数增量（d3 修正 pitch/roll，不修正 yaw）
     dq1 += (ex * Kp + ix) * half_dt;
@@ -342,21 +433,36 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   att.roll = -atan2f(vy, vz) * 57.3f;
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
-  if (stable_cnt > 100) {
-    // 指数滑动平均跟踪零偏漂移，时间常数 τ ≈ 10s
-
-    gx_bias = gx_bias * 0.9f + gx * 0.1f;
-    gy_bias = gy_bias * 0.9f + gy * 0.1f;
-    gyro_bias.gz_bias = gyro_bias.gz_bias * 0.9f + gz * 0.1f;
+  temp_stable_cnt++;
+  if (temp_stable_cnt % 300 == 0) { // 每次加速纠正零偏持续30s
+    if (fabsf(temp - last_temp) >= 0.5f) {
+      last_temp = temp;
+      temp_stable_cnt = 0;
+      temp_diff_flag = 1;
+    } else {
+      temp_diff_flag = 0;
+    }
   }
-    // printf("is_stable=%d, gx_bias=%.2f, gy_bias=%.2f, gz_bias=%.2f\r\n",
-    //        is_stable, gx_bias, gy_bias, gyro_bias.gz_bias);
-  // } else {
-  //   // 航向角纯陀螺积分（6轴模式无磁力计修正）
-  //   att.yaw_now += gz_comp * DT;
-  // }
-  att.yaw_now += gz_comp * DT;
-
+  if (stable_cnt > 500 || temp_diff_flag) {
+    // 指数滑动平均跟踪零偏漂移，时间常数 τ ≈ 10s
+    float stable_alpha = 0.01f; // 10s时间常数
+    float fast_alpha = 0.1f;    // 温度漂移修正更快
+    if (stable_cnt > 500) {
+      gx_bias = gx_bias * (1 - stable_alpha) + gx * stable_alpha;
+      gy_bias = gy_bias * (1 - stable_alpha) + gy * stable_alpha;
+      gyro_bias.gz_bias = gyro_bias.gz_bias * (1 - stable_alpha) + gz * stable_alpha;
+    } else if (stable_cnt > 500 && temp_diff_flag) {
+      gx_bias = gx_bias * (1 - fast_alpha) + gx * fast_alpha;
+      gy_bias = gy_bias * (1 - fast_alpha) + gy * fast_alpha;
+      gyro_bias.gz_bias = gyro_bias.gz_bias * (1 - fast_alpha) + gz * fast_alpha;
+    }
+  } else {
+    // 航向角纯陀螺积分（6轴模式无磁力计修正）
+    att.yaw_now += gz_comp * DT;
+  }
+  // att.yaw_now += gz_comp * DT;
+  // printf("is_stable=%d, yaw=%.5f, gz_bias=%.5f\r\n", is_stable, att.yaw_now,
+  //        gyro_bias.gz_bias);
   // 角度归一化到 [-180°, 180°]
   while (att.yaw_now > 180.0f) {
     att.yaw_now -= 360.0f;
@@ -745,11 +851,119 @@ void timer_config(void) {
   timer_enable(TIMER1);
 }
 
+/************************ 软I2C诊断（验证0x68器件用，确认后可删除）
+ * ************************/
+static void diag_scl(uint8_t level) {
+  if (level)
+    gpio_bit_set(GPIOA, GPIO_PIN_0);
+  else
+    gpio_bit_reset(GPIOA, GPIO_PIN_0);
+}
+static void diag_sda(uint8_t level) {
+  if (level)
+    gpio_bit_set(GPIOA, GPIO_PIN_1);
+  else
+    gpio_bit_reset(GPIOA, GPIO_PIN_1);
+}
+static uint8_t diag_sda_in(void) {
+  return gpio_input_bit_get(GPIOA, GPIO_PIN_1);
+}
+static void diag_start(void) {
+  diag_sda(1);
+  diag_scl(1);
+  delay_us(5);
+  diag_sda(0);
+  delay_us(5);
+  diag_scl(0);
+  delay_us(5);
+}
+static void diag_stop(void) {
+  diag_sda(0);
+  diag_scl(1);
+  delay_us(5);
+  diag_sda(1);
+  delay_us(5);
+}
+static uint8_t diag_send_byte(uint8_t byte) {
+  uint8_t i, ack;
+  for (i = 0; i < 8; i++) {
+    diag_scl(0);
+    delay_us(3);
+    if (byte & 0x80)
+      diag_sda(1);
+    else
+      diag_sda(0);
+    delay_us(2);
+    diag_scl(1);
+    delay_us(5);
+    byte <<= 1;
+  }
+  diag_scl(0);
+  delay_us(3);
+  diag_sda(1);
+  delay_us(2);
+  diag_scl(1);
+  delay_us(5);
+  ack = diag_sda_in(); /* 0=器件拉低SDA=ACK, 1=NACK */
+  diag_scl(0);
+  delay_us(5);
+  return (ack == 0) ? 0 : 1;
+}
+/* 诊断用读字节函数，已注释
+static uint8_t diag_read_byte(uint8_t ack_bit) {
+  uint8_t i, byte = 0;
+  diag_sda(1);
+  for (i = 0; i < 8; i++) {
+    diag_scl(0); delay_us(5);
+    diag_scl(1); delay_us(3);
+    byte <<= 1;
+    if (diag_sda_in()) byte |= 0x01;
+    delay_us(2);
+  }
+  diag_scl(0); delay_us(3);
+  if (ack_bit) diag_sda(0); else diag_sda(1);
+  delay_us(2); diag_scl(1); delay_us(5);
+  diag_scl(0); delay_us(5);
+  return byte;
+}
+*/
+static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data) {
+  diag_start();
+  diag_send_byte(dev << 1);
+  diag_send_byte(reg);
+  diag_send_byte(data);
+  diag_stop();
+}
+/* 开机软I2C读WHO_AM_I诊断（调试用，已注释，正式运行不需要） */
+// static void soft_i2c_whoami_diag(void) {
+//   uint8_t ack_w, ack_reg, ack_r, who;
+//
+//   printf("\r\n[DIAG] Soft-I2C read WHO_AM_I: dev=0x68 reg=0x75 ...\r\n");
+//
+//   gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_PULLUP, GPIO_PIN_0 |
+//   GPIO_PIN_1); gpio_output_options_set(GPIOA, GPIO_OTYPE_OD,
+//   GPIO_OSPEED_50MHZ, GPIO_PIN_0 | GPIO_PIN_1); diag_scl(1); diag_sda(1);
+//   delay_1ms(2);
+//
+//   diag_start();
+//   ack_w   = diag_send_byte(0x68 << 1);       /* 写地址 0xD0 */
+//   ack_reg = diag_send_byte(0x75);            /* 寄存器 0x75 */
+//   diag_start();                              /* RESTART */
+//   ack_r   = diag_send_byte((0x68 << 1) | 1); /* 读地址 0xD1 */
+//   who = diag_read_byte(0);                   /* 读1字节 + NACK */
+//   diag_stop();
+//
+//   printf("[DIAG] ACK: addrW=%s reg=%s addrR=%s | WHO_AM_I=0x%02X %s\r\n",
+//          ack_w ? "NACK" : "ACK", ack_reg ? "NACK" : "ACK", ack_r ? "NACK" :
+//          "ACK", who, (who == 0x67) ? "(OK 0x67)" : "(NOT 0x67!)");
+// }
+
 int main(void) {
   systick_config();
   com_usart_init();
-  // printf("Hellow word!\n");
-  // sprintf(transmitter_buffer, "HELLO_world!\n");
+  // soft_i2c_whoami_diag();   /*
+  // 开机软I2C读WHO_AM_I诊断：调试用，正式运行注释掉 */ printf("Hellow
+  // word!\n"); sprintf(transmitter_buffer, "HELLO_world!\n");
   // usart_interrupt_enable(USART0, USART_INT_TBE);
   // delay_1ms(10);
 
@@ -759,6 +973,20 @@ int main(void) {
   /* configure RCU */
   /* I2C1 硬件初始化（hard_i2c_init 内部已配置 GPIO 和 I2C1 外设） */
   hard_i2c_init();
+<<<<<<< HEAD
+=======
+
+  /* I2C总线扫描 - 检测设备是否存在（调试用，正式运行注释掉）
+  printf("=== I2C Bus Scan ===\n");
+  for(uint8_t addr = 0x08; addr <= 0x77; addr++) {
+    if(hard_i2c_probe(addr) == 0) {
+      printf("  Device found at 7-bit addr: 0x%02X (8-bit: 0x%02X)\n", addr,
+  addr << 1);
+    }
+  }
+  printf("=== Scan Done ===\n");
+  */
+>>>>>>> mainmain
   // printf("I2C init done!\n");
 
   // i2c_test();
@@ -782,8 +1010,14 @@ int main(void) {
       imu_loop_flag = 0;
 
       debug_cnt++;
+      /* 0x82 与 0x8E 错开 500ms 发送：
+         proto_send 对 usart0_tx_busy 是"直接丢弃"而非等待，
+         背靠背连发会导致第二帧被丢弃 */
       if (debug_cnt % 1000 == 0) {
         proto_send(0x82);
+      } else if (debug_cnt % 1000 == 500) {
+        proto_send(0x8E);
+      }
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
         //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
@@ -794,7 +1028,7 @@ int main(void) {
         // printf("gx=%.4f,gy=%.4f,gz=%.4f\r\n", icm_raw.gx, icm_raw.gy,
         //        icm_raw.gz);
       }
-    }
+    
     // 处理串口数据（空闲中断已计算 usart0_rx_len）
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;

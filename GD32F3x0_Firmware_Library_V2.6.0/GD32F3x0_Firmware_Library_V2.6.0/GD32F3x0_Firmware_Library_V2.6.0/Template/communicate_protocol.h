@@ -1,9 +1,10 @@
 #include "gd32f3x0_usart.h"
+#include "hard_i2c.h"
 #include "main.h"
-#include "soft_i2c.h"
 #include "stdint.h"
 #include <math.h>
 #include <stdio.h>
+
 
 #ifdef __CC_ARM
 #define PACKED __packed
@@ -243,9 +244,10 @@ void mag_strength_read_send() {
   buf[idx++] = 0x00; // 读取参数
 
   // mag_norm 整数值
-  uint16_t mag_val = (uint16_t)(mag_raw.mag_norm*100.0f); // 先乘100保留两位小数，再转 uint16
-  buf[idx++] = (uint8_t)(mag_val  >> 8);
-  buf[idx++] = (uint8_t)(mag_val  & 0xFF);
+  uint16_t mag_val =
+      (uint16_t)(mag_raw.mag_norm * 100.0f); // 先乘100保留两位小数，再转 uint16
+  buf[idx++] = (uint8_t)(mag_val >> 8);
+  buf[idx++] = (uint8_t)(mag_val & 0xFF);
 
   // // 三轴分量：先乘100保留两位小数，再转 int16
   // int16_t mx_i = (int16_t)(mag_raw.mx * 100.0f);
@@ -307,8 +309,8 @@ void heartbeat_send() {
   buf[idx++] = counter++; // 心跳计数（每帧+1，溢出自动归零）
 
   /* 探测 I2C 从设备是否在线（0=在线，1=离线）*/
-  buf[idx++] = soft_i2c_probe(0x68); // IMU(ICM42670) 状态
-  buf[idx++] = soft_i2c_probe(0x2C); // MAG(QMC5883P) 状态
+  buf[idx++] = hard_i2c_probe(0x68); // IMU(ICM42670) 状态
+  buf[idx++] = hard_i2c_probe(0x2C); // MAG(QMC5883P) 状态
 
   uint8_t frame_len = (uint8_t)(idx - 1);
   buf[1] = frame_len;
@@ -447,6 +449,9 @@ void proto_send(uint8_t cmd) {
     break;
   case 0x8D:
     active_report_ack_send();
+    break;
+  case 0x8E:
+    heartbeat_send();
     break;
   }
 }
