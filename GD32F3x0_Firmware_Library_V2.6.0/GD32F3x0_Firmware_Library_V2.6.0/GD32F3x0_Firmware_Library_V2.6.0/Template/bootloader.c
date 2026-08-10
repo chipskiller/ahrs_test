@@ -15,6 +15,7 @@
 #include "gd32f3x0_gpio.h"
 #include "gd32f3x0_usart.h"
 #include "gd32f3x0_fmc.h"
+#include "bootloader.h"
 #include "ota_protocol.h"
 #include <stdio.h>
 
@@ -28,12 +29,12 @@ int fputc(int ch, FILE *f) {
 
 /* ========== 系统时钟初始化（与 App 保持一致） ========== */
 static void bootloader_system_clock_config(void) {
-  /* GD32F330 默认内部 8MHz HSI，倍频到 72MHz */
-  rcu_osci_on(RCU_HSI);
-  rcu_osci_stab_wait(RCU_HSI);
-  rcu_cksys_config(RCU_CKSYSSRC_HSI);
+  /* GD32F330 默认内部 8MHz IRC8M，倍频到 72MHz */
+  rcu_osci_on(RCU_IRC8M);
+  rcu_osci_stab_wait(RCU_IRC8M);
+  rcu_system_clock_source_config(RCU_CKSYSSRC_IRC8M);
 
-  rcu_pll_config(RCU_PLLSRC_HSI_DIV2, RCU_PLL_MUL18); /* 8M/2*18 = 72MHz */
+  rcu_pll_config(RCU_PLLSRC_IRC8M_DIV2, RCU_PLL_MUL18); /* 8M/2*18 = 72MHz */
   rcu_osci_on(RCU_PLL_CK);
   rcu_osci_stab_wait(RCU_PLL_CK);
 

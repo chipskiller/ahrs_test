@@ -76,13 +76,13 @@ int fputc(int ch, FILE *f) {
  * - App 运行前需要确保系统时钟稳定
  */
 static void system_clock_config(void) {
-  /* 开启 HSI（内部高速振荡器，8MHz） */
-  rcu_osci_on(RCU_HSI);
-  rcu_osci_stab_wait(RCU_HSI);
-  rcu_cksys_config(RCU_CKSYSSRC_HSI);
+  /* 开启 IRC8M（内部高速振荡器，8MHz） */
+  rcu_osci_on(RCU_IRC8M);
+  rcu_osci_stab_wait(RCU_IRC8M);
+  rcu_system_clock_source_config(RCU_CKSYSSRC_IRC8M);
 
-  /* 配置 PLL：HSI/2 × 18 = 8M/2*18 = 72MHz */
-  rcu_pll_config(RCU_PLLSRC_HSI_DIV2, RCU_PLL_MUL18);
+  /* 配置 PLL：IRC8M/2 × 18 = 8M/2*18 = 72MHz */
+  rcu_pll_config(RCU_PLLSRC_IRC8M_DIV2, RCU_PLL_MUL18);
   rcu_osci_on(RCU_PLL_CK);
   rcu_osci_stab_wait(RCU_PLL_CK);
 
