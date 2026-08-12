@@ -1055,9 +1055,6 @@ int main(void) {
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
       if (usart0_rx_len >= 3) {
-        /* 按功能码分流：OTA(0xF0~0xF3) 与业务(0x82~0x8E)。
-           两者上行帧头都是 0xAA，不能按帧头分流，
-           否则业务命令(如 0x89)会被 OTA 解析器吞掉而无回复 */
         uint8_t rx_cmd = usart0_rx_buffer[2];
         if (rx_cmd >= 0xF0) {
           /* OTA 远程烧录协议 */
