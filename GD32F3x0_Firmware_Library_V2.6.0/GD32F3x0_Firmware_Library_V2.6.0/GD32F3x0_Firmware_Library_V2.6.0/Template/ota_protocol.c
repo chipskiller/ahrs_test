@@ -159,7 +159,7 @@ void ota_handle_start(uint8_t *frame, uint8_t len) {
     /* 版本相同，禁止升级 */
     // uint8_t rsp_data[1] = { OTA_FAIL };
     ota_send_response(OTA_CMD_START, OTA_FAIL, NULL, 0);
-    printf("[OTA] version same, reject upgrade\r\n");
+    //printf("[OTA] version same, reject upgrade\r\n");
     return;
   }
 
@@ -181,7 +181,7 @@ void ota_handle_start(uint8_t *frame, uint8_t len) {
 
   // uint8_t rsp_data[1] = {OTA_OK};
   ota_send_response(OTA_CMD_START, OTA_OK, NULL, 0);
-  printf("[OTA] start upgrade, total packets=%lu\r\n", ota_total_packets);
+  //printf("[OTA] start upgrade, total packets=%lu\r\n", ota_total_packets);
 }
 
 /* ========== 0xF1 升级写入 ========== */
@@ -215,8 +215,8 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
   /* 校验包号连续性：期望的包号必须等于实际收到的包号 */
   if (pkt_num != ota_packet_count) {
     ota_send_response(OTA_CMD_WRITE, OTA_FAIL, NULL, 0);
-    printf("[OTA] packet mismatch: expect=%lu, got=%u\r\n", ota_packet_count,
-           pkt_num);
+    //printf("[OTA] packet mismatch: expect=%lu, got=%u\r\n", ota_packet_count,
+          // pkt_num;
     return;
   }
 
@@ -226,7 +226,7 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
   /* 安全检查：防止越界写入（避免写坏其他分区） */
   if (write_addr + OTA_PKT_DATA_SIZE > DOWNLOAD_START_ADDR + DOWNLOAD_SIZE) {
     ota_send_response(OTA_CMD_WRITE, OTA_FAIL, NULL, 0);
-    printf("[OTA] write out of range\r\n");
+    //printf("[OTA] write out of range\r\n");
     return;
   }
 
@@ -258,7 +258,7 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
     ota_send_response(OTA_CMD_WRITE, OTA_OK, NULL, 0);
   } else {
     ota_send_response(OTA_CMD_WRITE, OTA_FAIL, NULL, 0);
-    printf("[OTA] write fail at packet %u\r\n", pkt_num);
+    //printf("[OTA] write fail at packet %u\r\n", pkt_num);
   }
 }
 
@@ -293,16 +293,16 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
   /* 校验包数：实际接收的包数必须等于上位机声明的总包数 */
   if (ota_packet_count != ota_total_packets) {
     ota_send_response(OTA_CMD_FINISH, OTA_FAIL, NULL, 0);
-    printf("[OTA] packet count mismatch: expect=%lu, got=%lu\r\n",
-           ota_total_packets, ota_packet_count);
+    //printf("[OTA] packet count mismatch: expect=%lu, got=%lu\r\n",
+          // ota_total_packets, ota_packet_count);
     return;
   }
 
   /* 校验总包校验码：确保整个固件数据完整。总包检验码不需要取反。*/
   if (host_checksum != ota_total_checksum) {
     ota_send_response(OTA_CMD_FINISH, OTA_FAIL, NULL, 0);
-    printf("[OTA] checksum mismatch: host=0x%02X, calc=0x%02X\r\n",
-           host_checksum, ota_total_checksum);
+    //printf("[OTA] checksum mismatch: host=0x%02X, calc=0x%02X\r\n",
+          // host_checksum, ota_total_checksum);
     return;
   }
 
@@ -325,7 +325,7 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
   ota_state = OTA_STATE_IDLE; /* 回到空闲状态 */
 
   ota_send_response(OTA_CMD_FINISH, OTA_OK, NULL, 0);
-  printf("[OTA] upgrade finish OK, reboot to install\r\n");
+  //printf("[OTA] upgrade finish OK, reboot to install\r\n");
 }
 
 /* ========== 0xF3 查询版本号 ========== */
@@ -439,7 +439,7 @@ void ota_protocol_parse(uint8_t byte) {
           }
         } else {
           /* 校验失败，记录日志以便调试 */
-          printf("[OTA] checksum error\r\n");
+          //printf("[OTA] checksum error\r\n");
         }
 
         /* 无论处理成功与否，重置状态机准备接收下一帧 */
@@ -497,7 +497,7 @@ uint8_t ota_check_pending_upgrade(void) {
  * 起始）绝对安全！
  */
 void ota_install_firmware(void) {
-  printf("[OTA] installing firmware...\r\n");
+  //printf("[OTA] installing firmware...\r\n");
 
   /* 擦除 App 区（第 4-11 页，每页 1024 字节） */
   fmc_unlock();
@@ -519,5 +519,5 @@ void ota_install_firmware(void) {
   fmc_page_erase(OTA_FLAG_ADDR);
 
   fmc_lock();
-  printf("[OTA] install complete, jumping to app...\r\n");
+  //printf("[OTA] install complete, jumping to app...\r\n");
 }
