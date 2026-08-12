@@ -100,8 +100,9 @@ void bootloader_jump_to_app(void) {
   __set_MSP(app_sp);
   __set_PSP(app_sp);
 
-  /* 跳转到 App 复位处理函数（清除 Thumb 位） */
-  void (*app_reset_handler)(void) = (void (*)(void))(app_pc & ~1U);
+  /* 跳转到 App 复位处理函数（必须保留 Thumb 位！Cortex-M 只支持 Thumb，
+     清除 Thumb 位会使 BLX 切到 ARM 状态导致 HardFault） */
+  void (*app_reset_handler)(void) = (void (*)(void))app_pc;
   app_reset_handler();
 }
 

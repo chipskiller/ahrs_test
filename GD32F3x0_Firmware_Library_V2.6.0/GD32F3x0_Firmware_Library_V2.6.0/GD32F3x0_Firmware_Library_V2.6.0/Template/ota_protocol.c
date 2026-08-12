@@ -47,11 +47,11 @@
 
 /* ========== Flash 地址定义 ========== */
 /* 这些地址必须与 flash.h 中的分区定义保持一致 */
-#define APP_START_ADDR      0x08001000U  /* App 区起始地址（第 4 页），当前运行的固件在这里 */
-#define APP_END_ADDR        0x08007FFFU  /* App 区结束地址（第 11 页），升级时会被擦除 */
-#define DOWNLOAD_START_ADDR 0x08008000U  /* 下载区起始地址（第 12 页），临时存放新固件 */
-#define DOWNLOAD_SIZE       0x00006000U  /* 下载区大小 24KB（第 12-19 页） */
-#define DATA_ZONE_START     0x0800E000U  /* 数据分区起始（第 20 页），OTA 绝不触碰 */
+#define APP_START_ADDR      0x08002000U  /* App 区起始地址（第 8 页），当前运行的固件在这里 */
+#define APP_END_ADDR        0x08008FFFU  /* App 区结束地址（第 35 页），升级时会被擦除 */
+#define DOWNLOAD_START_ADDR 0x08009000U  /* 下载区起始地址（第 36 页），临时存放新固件 */
+#define DOWNLOAD_SIZE       0x00007000U  /* 下载区大小 28KB（第 36-63 页） */
+#define DATA_ZONE_START     0x08010000U  /* 数据分区起始（第 64 页），OTA 绝不触碰 */
 
 /* ========== 全局变量 ========== */
 /* volatile 关键字告诉编译器这些变量可能被中断修改，不要优化掉 */

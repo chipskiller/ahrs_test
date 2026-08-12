@@ -269,40 +269,41 @@ void SystemInit(void)
     SCB->CPACR |= ((3UL << 10U * 2U) | (3UL << 11U * 2U)); /* set CP10 and CP11 Full Access */
 #endif
 
-    /* enable IRC8M */
-    RCU_CTL0 |= RCU_CTL0_IRC8MEN;
-    while(0U == (RCU_CTL0 & RCU_CTL0_IRC8MSTB)) {
-    }
+    /* 时钟重配：仅在“系统时钟源不是 PLL”（冷启动）时执行。
+       从 bootloader 跳转过来时系统已是 84MHz PLL，若再切 IRC8M→关 PLL→重配，
+       PLL 可能锁不上导致下方 while(...) 死循环，App 卡死在 SystemInit。 */
+    if((RCU_CFG0 & RCU_CFG0_SCSS) != RCU_SCSS_PLL) {
+        /* enable IRC8M */
+        RCU_CTL0 |= RCU_CTL0_IRC8MEN;
+        while(0U == (RCU_CTL0 & RCU_CTL0_IRC8MSTB)) {
+        }
 
-    if(((RCU_CFG0 & RCU_CFG0_SCSS) == RCU_SCSS_PLL)){
-        RCU_MODIFY_4(0x50U);
-    }
+        RCU_CFG0 &= ~(RCU_CFG0_SCS);
+        _soft_delay_(200U);
 
-    RCU_CFG0 &= ~(RCU_CFG0_SCS);
-    _soft_delay_(200U);
+        RCU_CTL0 &= ~(RCU_CTL0_HXTALEN | RCU_CTL0_CKMEN | RCU_CTL0_PLLEN | RCU_CTL0_HXTALBPS);
 
-    RCU_CTL0 &= ~(RCU_CTL0_HXTALEN | RCU_CTL0_CKMEN | RCU_CTL0_PLLEN | RCU_CTL0_HXTALBPS);
-
-    /* reset RCU */
-    RCU_CFG0 &= ~(RCU_CFG0_SCS | RCU_CFG0_AHBPSC | RCU_CFG0_APB1PSC | RCU_CFG0_APB2PSC | \
-                  RCU_CFG0_ADCPSC | RCU_CFG0_CKOUTSEL | RCU_CFG0_CKOUTDIV | RCU_CFG0_PLLDV);
-    RCU_CFG0 &= ~(RCU_CFG0_PLLSEL | RCU_CFG0_PLLMF | RCU_CFG0_PLLMF4 | RCU_CFG0_PLLDV);
+        /* reset RCU */
+        RCU_CFG0 &= ~(RCU_CFG0_SCS | RCU_CFG0_AHBPSC | RCU_CFG0_APB1PSC | RCU_CFG0_APB2PSC | \
+                      RCU_CFG0_ADCPSC | RCU_CFG0_CKOUTSEL | RCU_CFG0_CKOUTDIV | RCU_CFG0_PLLDV);
+        RCU_CFG0 &= ~(RCU_CFG0_PLLSEL | RCU_CFG0_PLLMF | RCU_CFG0_PLLMF4 | RCU_CFG0_PLLDV);
 #if (defined(GD32F350) || defined(GD32F355) || defined(GD32F370))
-    RCU_CFG0 &= ~(RCU_CFG0_USBFSPSC);
-    RCU_CFG2 &= ~(RCU_CFG2_CECSEL | RCU_CFG2_USBFSPSC2);
+        RCU_CFG0 &= ~(RCU_CFG0_USBFSPSC);
+        RCU_CFG2 &= ~(RCU_CFG2_CECSEL | RCU_CFG2_USBFSPSC2);
 #endif /* GD32F350, GD32F355 and GD32F370 */
 
-    RCU_CFG1 &= ~(RCU_CFG1_PREDV | RCU_CFG1_PLLMF5 | RCU_CFG1_PLLPRESEL);
-    RCU_CFG2 &= ~(RCU_CFG2_USART0SEL | RCU_CFG2_ADCSEL);
-    RCU_CFG2 &= ~RCU_CFG2_IRC28MDIV;
-    RCU_CFG2 &= ~RCU_CFG2_ADCPSC2;
-    RCU_CTL1 &= ~RCU_CTL1_IRC28MEN;
-    RCU_ADDCTL &= ~RCU_ADDCTL_IRC48MEN;
-    RCU_INT = 0x00000000U;
-    RCU_ADDINT = 0x00000000U;
+        RCU_CFG1 &= ~(RCU_CFG1_PREDV | RCU_CFG1_PLLMF5 | RCU_CFG1_PLLPRESEL);
+        RCU_CFG2 &= ~(RCU_CFG2_USART0SEL | RCU_CFG2_ADCSEL);
+        RCU_CFG2 &= ~RCU_CFG2_IRC28MDIV;
+        RCU_CFG2 &= ~RCU_CFG2_ADCPSC2;
+        RCU_CTL1 &= ~RCU_CTL1_IRC28MEN;
+        RCU_ADDCTL &= ~RCU_ADDCTL_IRC48MEN;
+        RCU_INT = 0x00000000U;
+        RCU_ADDINT = 0x00000000U;
 
-    /* configure system clock */
-    system_clock_config();
+        /* configure system clock */
+        system_clock_config();
+    }
 
 #ifdef VECT_TAB_SRAM
     nvic_vector_table_set(NVIC_VECTTAB_RAM, VECT_TAB_OFFSET);

@@ -9,6 +9,25 @@
 #include "systick.h"
 #include <stdint.h>
 
+/* ========== 禁用半主机（semihosting）==========
+   标准 C 库的 printf 首次调用会走 semihosting（执行 BKPT 0xAB 请求调试器服务），
+   没有调试器连接时触发 HardFault（HFSR.DEBUGEVT=1）。
+   __use_no_semihosting 让链接器改用不含半主机的库版本，并保留浮点 %f 支持。 */
+#pragma import(__use_no_semihosting)
+struct __FILE { int handle; };
+FILE __stdout;
+void _sys_exit(int x) { x = x; }
+void _ttywrch(int ch) { (void)ch; }
+
+/* ========== printf 重定向到 USART0 ==========
+   禁用半主机后必须自行提供 fputc，否则链接器会用 C 库自带的半主机版 fputc，
+   导致 L6915E：__use_no_semihosting 与半主机 fputc 冲突。 */
+int fputc(int ch, FILE *f) {
+    usart_data_transmit(USART0, (uint8_t)ch);
+    while(RESET == usart_flag_get(USART0, USART_FLAG_TBE));
+    return ch;
+}
+
 #define delay_ms(x) delay_1ms(x)
 
 /************************ 宏定义区域 ************************/
@@ -955,8 +974,18 @@ static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data) {
 // }
 
 int main(void) {
+  /* App 链接在 0x08002000（bootloader 之后），启动必须把中断向量表重定位到 App 区 */
+  SCB->VTOR = 0x08002000U;
+
+  /* bootloader 跳转前调用了 __disable_irq() 关掉全局中断，必须恢复，
+     否则 SysTick 中断不触发 → delay_1ms()/delay_ms() 会死循环卡死 */
+  __enable_irq();
+
   systick_config();
   com_usart_init();
+  printf("[APP] started\r\n");
+
+
   // soft_i2c_whoami_diag();   /*
   // 开机软I2C读WHO_AM_I诊断：调试用，正式运行注释掉 */ printf("Hellow
   // word!\n"); sprintf(transmitter_buffer, "HELLO_world!\n");
@@ -1026,8 +1055,11 @@ int main(void) {
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
       if (usart0_rx_len >= 3) {
-        /* OTA 协议帧头为 0xAA，业务协议帧头为 0x55（回复）或其他 */
-        if (usart0_rx_buffer[0] == 0xAA) {
+        /* 按功能码分流：OTA(0xF0~0xF3) 与业务(0x82~0x8E)。
+           两者上行帧头都是 0xAA，不能按帧头分流，
+           否则业务命令(如 0x89)会被 OTA 解析器吞掉而无回复 */
+        uint8_t rx_cmd = usart0_rx_buffer[2];
+        if (rx_cmd >= 0xF0) {
           /* OTA 远程烧录协议 */
           for (uint16_t i = 0; i < usart0_rx_len; i++) {
             ota_protocol_parse(usart0_rx_buffer[i]);

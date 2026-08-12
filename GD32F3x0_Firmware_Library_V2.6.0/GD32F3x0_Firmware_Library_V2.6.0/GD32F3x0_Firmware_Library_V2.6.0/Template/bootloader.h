@@ -8,8 +8,8 @@ extern "C" {
 #endif
 
 /* ========== Bootloader 配置 ========== */
-#define BOOTLOADER_SIZE    0x00001000U  /* 4KB */
-#define APP_START_ADDR     0x08001000U  /* App 起始地址（第 4 页） */
+#define BOOTLOADER_SIZE    0x00002000U  /* 8KB */
+#define APP_START_ADDR     0x08002000U  /* App 起始地址（第 8 页） */
 
 /* ========== API ========== */
 

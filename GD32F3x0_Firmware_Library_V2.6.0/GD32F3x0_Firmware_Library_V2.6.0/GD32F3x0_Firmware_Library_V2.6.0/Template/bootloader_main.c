@@ -51,7 +51,7 @@
 #include <stdio.h>
 
 /* ========== Bootloader 配置 ========== */
-#define APP_START_ADDR 0x08001000U /* App 起始地址（第 4 页），固件运行位置 */
+#define APP_START_ADDR 0x08002000U /* App 起始地址（第 8 页），固件运行位置 */
 
 /* ========== 重定向 printf 到 USART0 ========== */
 /*
@@ -65,39 +65,17 @@ int fputc(int ch, FILE *f) {
   return ch;
 }
 
-/* ========== 系统时钟初始化 ========== */
+/* ========== 系统时钟说明 ========== */
 /*
- * 功能：配置系统时钟为 72MHz
- * 时钟树：HSI(8MHz) → PLL(×18) → SYSCLK(72MHz)
- * 
- * 为什么需要初始化时钟？
- * - Flash 操作需要一定的时钟频率
- * - 串口通信需要准确的波特率
- * - App 运行前需要确保系统时钟稳定
+ * 系统时钟由 startup 的 SystemInit()（system_gd32f3x0.c）配置为 84MHz。
+ * bootloader 不再重复配置 PLL——否则会与 SystemInit 的 84MHz 冲突，
+ * 导致波特率异常，并可能在跳转后让 App 的 SystemInit 重新配时钟时卡死。
+ * bootloader 直接使用 SystemInit 的 84MHz，USART0 按 9600 配置。
  */
-static void system_clock_config(void) {
-  /* 开启 IRC8M（内部高速振荡器，8MHz） */
-  rcu_osci_on(RCU_IRC8M);
-  rcu_osci_stab_wait(RCU_IRC8M);
-  rcu_system_clock_source_config(RCU_CKSYSSRC_IRC8M);
-
-  /* 配置 PLL：IRC8M/2 × 18 = 8M/2*18 = 72MHz */
-  rcu_pll_config(RCU_PLLSRC_IRC8M_DIV2, RCU_PLL_MUL18);
-  rcu_osci_on(RCU_PLL_CK);
-  rcu_osci_stab_wait(RCU_PLL_CK);
-
-  /* 配置总线分频 */
-  rcu_ahb_clock_config(RCU_AHB_CKSYS_DIV1);   /* AHB = 72MHz */
-  rcu_apb2_clock_config(RCU_APB2_CKAHB_DIV1); /* APB2 = 72MHz */
-  rcu_apb1_clock_config(RCU_APB1_CKAHB_DIV2); /* APB1 = 36MHz */
-
-  /* 切换系统时钟源为 PLL */
-  rcu_system_clock_source_config(RCU_CKSYSSRC_PLL);
-}
 
 /* ========== USART0 初始化 ========== */
 /*
- * 功能：配置串口 0 为 115200 波特率，8 数据位，1 停止位，无校验
+ * 功能：配置串口 0 为 9600 波特率，8 数据位，1 停止位，无校验
  * 引脚：PA9 = TX（发送），PA10 = RX（接收）
  * 
  * 为什么需要串口？
@@ -120,7 +98,7 @@ static void usart_init(void) {
 
   /* 配置 USART0 参数 */
   usart_deinit(USART0);
-  usart_baudrate_set(USART0, 115200U);        /* 波特率 115200 */
+  usart_baudrate_set(USART0, 9600U);        /* 波特率 9600 */
   usart_word_length_set(USART0, USART_WL_8BIT); /* 8 数据位 */
   usart_stop_bit_set(USART0, USART_STB_1BIT);   /* 1 停止位 */
   usart_parity_config(USART0, USART_PM_NONE);   /* 无校验 */
@@ -188,8 +166,10 @@ static void jump_to_app(void) {
   __set_PSP(app_sp);
 
   /* 跳转到 App 复位处理函数 */
-  /* app_pc 的最低位是 Thumb 标志位（必须为 1），跳转时需要清除 */
-  void (*app_reset_handler)(void) = (void (*)(void))(app_pc & ~1U);
+  /* 关键：必须保留 Thumb 位（app_pc 最低位为 1）。
+     Cortex-M 只支持 Thumb 指令，BLX/BX 会用地址最低位切换状态：
+     bit0=1 → Thumb（正确）；bit0=0 → ARM 状态 → UsageFault/HardFault！ */
+  void (*app_reset_handler)(void) = (void (*)(void))app_pc;
   app_reset_handler(); /* 执行跳转，从此处开始运行 App */
 }
 
@@ -203,37 +183,32 @@ static void jump_to_app(void) {
  * 5. 如果无效，进入 OTA 等待模式
  */
 int main(void) {
+  /* 步骤 0：先初始化串口——printf 依赖 USART0。
+     系统时钟已由 startup 的 SystemInit 配置为 84MHz，bootloader 不再重复配置 PLL */
+  usart_init();
+  printf("[BL] Bootloader started\r\n");
+
   /* 步骤 1：检查是否有待安装的升级固件 */
-  /* ota_check_pending_upgrade() 读取 Flash 中的升级标志 */
   if (ota_check_pending_upgrade()) {
-    /* 有升级标志，需要初始化外设以支持 Flash 操作和串口打印 */
-    system_clock_config();
-    usart_init();
     printf("[BL] pending upgrade detected, installing...\r\n");
-    
-    /* 步骤 2：执行固件安装（下载区 → App 区） */
     ota_install_firmware();
   }
 
-  /* 步骤 3：检查 App 区是否有效 */
+  /* 步骤 2：检查 App 区是否有效 */
   if (is_app_valid()) {
-    /* App 有效，直接跳转（不需要初始化外设，App 会自己初始化） */
-    /* 注意：跳转前不要初始化太多外设，否则 App 再次初始化可能冲突 */
+    uint32_t app_sp = *((volatile uint32_t *)APP_START_ADDR);
+    uint32_t app_pc = *((volatile uint32_t *)(APP_START_ADDR + 4));
+    printf("[BL] jumping: sp=0x%08lX reset=0x%08lX\r\n", app_sp, app_pc);
     jump_to_app();
   }
 
-  /* 步骤 4：App 无效，进入 OTA 等待模式 */
-  /* 初始化时钟和串口，准备接收上位机下发的固件 */
-  system_clock_config();
-  usart_init();
+  /* 步骤 3：App 无效，进入 OTA 等待模式 */
   printf("[BL] no valid app, waiting for OTA...\r\n");
 
   /* 主循环：等待上位机下发 OTA 命令 */
   while (1) {
-    /* 检查串口是否收到数据 */
     if (RESET != usart_flag_get(USART0, USART_FLAG_RBNE)) {
       uint8_t byte = (uint8_t)usart_data_receive(USART0);
-      /* 逐字节解析 OTA 协议 */
       ota_protocol_parse(byte);
     }
   }
