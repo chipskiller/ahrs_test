@@ -1036,9 +1036,9 @@ int main(void) {
          proto_send 对 usart0_tx_busy 是"直接丢弃"而非等待，
          背靠背连发会导致第二帧被丢弃 */
       if (debug_cnt % 1000 == 0) {
-        proto_send(0x82);
+        // proto_send(0x82);
       } else if (debug_cnt % 1000 == 500) {
-        proto_send(0x8E);
+        // proto_send(0x8E);
       }
         // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
         // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",

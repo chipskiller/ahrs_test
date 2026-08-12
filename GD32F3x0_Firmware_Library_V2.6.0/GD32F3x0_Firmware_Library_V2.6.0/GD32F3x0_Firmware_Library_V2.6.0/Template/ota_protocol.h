@@ -42,8 +42,8 @@ extern "C" {
 
 /* ========== 状态码 ========== */
 
-#define OTA_OK              0x00U   /* 操作成功 */
-#define OTA_FAIL             0xFFU   /* 操作失败 */
+#define OTA_OK               0x00U   /* 操作成功 */
+#define OTA_FAIL             0x01U   /* 操作失败 */
 
 /* ========== 数据包配置 ========== */
 
@@ -89,7 +89,7 @@ typedef enum {
 extern volatile ota_state_t  ota_state;          /* OTA 当前状态 */
 extern volatile uint32_t     ota_packet_count;   /* 已接收包数 */
 extern volatile uint32_t     ota_total_packets;  /* 固件总包数 */
-extern volatile uint32_t     ota_total_checksum; /* 累计校验码 */
+extern volatile uint8_t      ota_total_checksum; /* 累计校验码（1 字节，全文件逐字节异或） */
 extern volatile uint8_t      ota_rx_buffer[OTA_PKT_DATA_SIZE]; /* 接收缓冲区 */
 extern volatile uint16_t     ota_rx_len;         /* 已接收长度 */
 

@@ -38,8 +38,8 @@
 #include "ota_protocol.h"
 #include "gd32f3x0_fmc.h"
 #include "gd32f3x0_usart.h"
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 /* ========== 固件版本号 ========== */
 /* 上位机通过对比版本号判断是否需要升级，版本相同则拒绝升级 */
@@ -47,26 +47,31 @@
 
 /* ========== Flash 地址定义 ========== */
 /* 这些地址必须与 flash.h 中的分区定义保持一致 */
-#define APP_START_ADDR      0x08002000U  /* App 区起始地址（第 8 页），当前运行的固件在这里 */
-#define APP_END_ADDR        0x08008FFFU  /* App 区结束地址（第 35 页），升级时会被擦除 */
-#define DOWNLOAD_START_ADDR 0x08009000U  /* 下载区起始地址（第 36 页），临时存放新固件 */
-#define DOWNLOAD_SIZE       0x00007000U  /* 下载区大小 28KB（第 36-63 页） */
-#define DATA_ZONE_START     0x08010000U  /* 数据分区起始（第 64 页），OTA 绝不触碰 */
+#define APP_START_ADDR                                                         \
+  0x08002000U /* App 区起始地址（第 8 页），当前运行的固件在这里 */
+#define APP_END_ADDR                                                           \
+  0x08008FFFU /* App 区结束地址（第 35 页），升级时会被擦除 */
+#define DOWNLOAD_START_ADDR                                                    \
+  0x08009000U /* 下载区起始地址（第 36 页），临时存放新固件 */
+#define DOWNLOAD_SIZE 0x00007000U /* 下载区大小 28KB（第 36-63 页） */
+#define DATA_ZONE_START                                                        \
+  0x08010000U /* 数据分区起始（第 64 页），OTA 绝不触碰         \
+               */
 
 /* ========== 全局变量 ========== */
 /* volatile 关键字告诉编译器这些变量可能被中断修改，不要优化掉 */
-volatile ota_state_t ota_state = OTA_STATE_IDLE;       /* OTA 当前状态 */
-volatile uint32_t ota_packet_count = 0;                /* 已接收的包数 */
-volatile uint32_t ota_total_packets = 0;               /* 固件总包数 */
-volatile uint32_t ota_total_checksum = 0;              /* 累计校验码 */
-volatile uint8_t  ota_rx_buffer[OTA_PKT_DATA_SIZE];    /* 接收缓冲区 */
-volatile uint16_t ota_rx_len = 0;                      /* 已接收长度 */
+volatile ota_state_t ota_state = OTA_STATE_IDLE;   /* OTA 当前状态 */
+volatile uint32_t ota_packet_count = 0;            /* 已接收的包数 */
+volatile uint32_t ota_total_packets = 0;           /* 固件总包数 */
+volatile uint8_t ota_total_checksum = 0;           /* 累计校验码（1 字节） */
+volatile uint8_t ota_rx_buffer[OTA_PKT_DATA_SIZE]; /* 接收缓冲区 */
+volatile uint16_t ota_rx_len = 0;                  /* 已接收长度 */
 
 /* ========== 帧解析缓冲区 ========== */
 /* 用于暂存从串口收到的数据帧，最大 600 字节 */
 static uint8_t parse_buf[600];
-static uint16_t parse_idx = 0;         /* 当前写入位置 */
-static uint8_t  parse_state = 0;       /* 解析状态：0=等待帧头, 1=收帧长, 2=收数据 */
+static uint16_t parse_idx = 0;  /* 当前写入位置 */
+static uint8_t parse_state = 0; /* 解析状态：0=等待帧头, 1=收帧长, 2=收数据 */
 
 /* ========== 校验码计算 ========== */
 /*
@@ -97,35 +102,34 @@ static uint8_t ota_calc_checksum(const uint8_t *data, uint16_t len) {
  *
  * 帧格式：[帧头 0xAA] [帧长] [功能码] [状态] [数据...] [校验码]
  */
-void ota_send_response(uint8_t cmd, uint8_t status, const uint8_t *data, uint8_t data_len) {
+void ota_send_response(uint8_t cmd, uint8_t status, const uint8_t *data,
+                       uint8_t data_len) {
   uint8_t tx_buf[600];
   uint16_t idx = 0;
 
-  tx_buf[idx++] = OTA_RSP_HEAD;                      /* 帧头 */
-  tx_buf[idx++] = 2 + data_len;                      /* 帧长 = 功能码 + 状态 + 数据 */
-  tx_buf[idx++] = cmd;                               /* 功能码 */
-  tx_buf[idx++] = status;                            /* 状态码 */
-
+  tx_buf[idx++] = OTA_RSP_HEAD; /* 帧头 */
+  tx_buf[idx++] = 0;            /* 帧长 = 功能码 + 状态 + 数据 */
+  tx_buf[idx++] = cmd;          /* 功能码 */
   if (data != NULL && data_len > 0) {
-    memcpy(&tx_buf[idx], data, data_len);            /* 复制数据 */
+    memcpy(&tx_buf[idx], data, data_len); /* 复制数据 */
     idx += data_len;
   }
-
-  uint8_t cs = ota_calc_checksum(&tx_buf[1], idx - 1); /* 计算校验码 */
+  tx_buf[idx++] = status; /* 状态码 */
+  tx_buf[1] = idx - 1;    /* 帧长 = 总帧长-2 = 功能码+数据+状态+校验码（不含帧头和帧长本身） */
+  uint8_t cs = ota_calc_checksum(&tx_buf[1], idx - 1); /* 计算校验码（从帧长到状态） */
   tx_buf[idx++] = cs;
 
   /* 阻塞发送（升级过程中允许阻塞，因为此时不需要运行其他功能） */
   for (uint16_t i = 0; i < idx; i++) {
-    while (RESET == usart_flag_get(USART0, USART_FLAG_TBE)) /* 等待发送缓冲区空 */
+    while (RESET ==
+           usart_flag_get(USART0, USART_FLAG_TBE)) /* 等待发送缓冲区空 */
       ;
     usart_data_transmit(USART0, tx_buf[i]);
   }
 }
 
 /* ========== 获取版本号 ========== */
-const char *ota_get_version(void) {
-  return FW_VERSION;
-}
+const char *ota_get_version(void) { return FW_VERSION; }
 
 /* ========== 0xF0 开始升级 ========== */
 /*
@@ -139,7 +143,8 @@ const char *ota_get_version(void) {
  * 4. 回复上位机 "准备就绪"
  */
 void ota_handle_start(uint8_t *frame, uint8_t len) {
-  /* 帧长度至少 22 字节：1(帧头) + 1(帧长) + 1(功能码) + 2(总包数) + 16(版本号) + 1(校验码) */
+  /* 帧长度至少 22 字节：1(帧头) + 1(帧长) + 1(功能码) + 2(总包数) + 16(版本号)
+   * + 1(校验码) */
   if (len < 22) {
     ota_send_response(OTA_CMD_START, OTA_FAIL, NULL, 0);
     return;
@@ -152,14 +157,15 @@ void ota_handle_start(uint8_t *frame, uint8_t len) {
   /* 对比版本号 */
   if (strcmp(recv_version, FW_VERSION) == 0) {
     /* 版本相同，禁止升级 */
-    uint8_t rsp_data[1] = {OTA_FAIL};
-    ota_send_response(OTA_CMD_START, OTA_FAIL, rsp_data, 1);
+    // uint8_t rsp_data[1] = { OTA_FAIL };
+    ota_send_response(OTA_CMD_START, OTA_FAIL, NULL, 0);
     printf("[OTA] version same, reject upgrade\r\n");
     return;
   }
 
   /* 版本不同，允许升级 */
-  ota_total_packets = ((uint32_t)frame[3] << 8) | frame[4]; /* 组合高8位和低8位 */
+  ota_total_packets =
+      ((uint32_t)frame[3] << 8) | frame[4]; /* 组合高8位和低8位 */
   ota_packet_count = 0;
   ota_total_checksum = 0;
   ota_state = OTA_STATE_RECEIVING; /* 切换到接收状态 */
@@ -167,13 +173,14 @@ void ota_handle_start(uint8_t *frame, uint8_t len) {
   /* 擦除下载区（第 12-19 页，每页 1024 字节） */
   /* 擦除 Flash 是写入的前提，Flash 只能从 1 写为 0，不能从 0 写为 1 */
   fmc_unlock(); /* 解锁 Flash 控制器 */
-  for (uint32_t page = DOWNLOAD_START_ADDR; page < DOWNLOAD_START_ADDR + DOWNLOAD_SIZE; page += 1024) {
+  for (uint32_t page = DOWNLOAD_START_ADDR;
+       page < DOWNLOAD_START_ADDR + DOWNLOAD_SIZE; page += 1024) {
     fmc_page_erase(page); /* 逐页擦除 */
   }
   fmc_lock(); /* 重新锁定，防止误操作 */
 
-  uint8_t rsp_data[1] = {OTA_OK};
-  ota_send_response(OTA_CMD_START, OTA_OK, rsp_data, 1);
+  // uint8_t rsp_data[1] = {OTA_OK};
+  ota_send_response(OTA_CMD_START, OTA_OK, NULL, 0);
   printf("[OTA] start upgrade, total packets=%lu\r\n", ota_total_packets);
 }
 
@@ -195,8 +202,9 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
     return;
   }
 
-  /* 帧长度至少 517 字节：1(帧头) + 1(帧长) + 1(功能码) + 2(包号) + 512(数据) + 1(校验码) */
-  if (len < 517) {
+  /* 帧长度至少 518 字节：1(帧头) + 1(帧长) + 1(功能码) + 2(包号) + 512(数据) +
+   * 1(校验码) */
+  if (len < 518) {
     ota_send_response(OTA_CMD_WRITE, OTA_FAIL, NULL, 0);
     return;
   }
@@ -207,7 +215,8 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
   /* 校验包号连续性：期望的包号必须等于实际收到的包号 */
   if (pkt_num != ota_packet_count) {
     ota_send_response(OTA_CMD_WRITE, OTA_FAIL, NULL, 0);
-    printf("[OTA] packet mismatch: expect=%lu, got=%u\r\n", ota_packet_count, pkt_num);
+    printf("[OTA] packet mismatch: expect=%lu, got=%u\r\n", ota_packet_count,
+           pkt_num);
     return;
   }
 
@@ -227,7 +236,7 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
   uint8_t write_ok = 1;
   for (uint16_t i = 0; i < OTA_PKT_DATA_SIZE; i += 4) {
     uint32_t word;
-    memcpy(&word, &frame[5 + i], 4); /* 从帧中提取 4 字节 */
+    memcpy(&word, &frame[5 + i], 4);        /* 从帧中提取 4 字节 */
     fmc_word_program(write_addr + i, word); /* 写入 Flash */
 
     /* 回读校验：写入后立即读取，确认数据正确 */
@@ -242,8 +251,11 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
 
   if (write_ok) {
     ota_packet_count++; /* 包数 +1 */
-    uint8_t rsp_data[1] = {OTA_OK};
-    ota_send_response(OTA_CMD_WRITE, OTA_OK, rsp_data, 1);
+    /* 累计整包校验码：逐字节异或（1 字节）*/
+    for (uint16_t i = 0; i < OTA_PKT_DATA_SIZE; i++) {
+      ota_total_checksum ^= frame[5 + i];
+    }
+    ota_send_response(OTA_CMD_WRITE, OTA_OK, NULL, 0);
   } else {
     ota_send_response(OTA_CMD_WRITE, OTA_FAIL, NULL, 0);
     printf("[OTA] write fail at packet %u\r\n", pkt_num);
@@ -253,7 +265,7 @@ void ota_handle_write(uint8_t *frame, uint8_t len) {
 /* ========== 0xF2 升级结束 ========== */
 /*
  * 上位机发送此命令表示所有数据包已发送完毕
- * 帧格式: [AA] [03] [F2] [总包校验码4字节] [校验码]
+ * 帧格式: [AA] [03] [F2] [总包校验码1字节] [校验码]
  *
  * 处理流程：
  * 1. 校验总包数是否正确
@@ -268,15 +280,15 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
     return;
   }
 
-  /* 帧长度至少 7 字节：1(帧头) + 1(帧长) + 1(功能码) + 4(校验码) + 1(校验码) */
-  if (len < 7) {
+  /* 帧长度至少 5 字节：1(帧头) + 1(帧长) + 1(功能码) + 1(总包校验码) +
+   * 1(帧校验码) */
+  if (len < 5) {
     ota_send_response(OTA_CMD_FINISH, OTA_FAIL, NULL, 0);
     return;
   }
 
-  /* 提取上位机发来的总包校验码（4 字节） */
-  uint32_t host_checksum;
-  memcpy(&host_checksum, &frame[3], 4);
+  /* 提取上位机发来的总包校验码（1 字节） */
+  uint8_t host_checksum = frame[3];
 
   /* 校验包数：实际接收的包数必须等于上位机声明的总包数 */
   if (ota_packet_count != ota_total_packets) {
@@ -286,10 +298,10 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
     return;
   }
 
-  /* 校验总包校验码：确保整个固件数据完整 */
+  /* 校验总包校验码：确保整个固件数据完整。总包检验码不需要取反。*/
   if (host_checksum != ota_total_checksum) {
     ota_send_response(OTA_CMD_FINISH, OTA_FAIL, NULL, 0);
-    printf("[OTA] checksum mismatch: host=0x%08lX, calc=0x%08lX\r\n",
+    printf("[OTA] checksum mismatch: host=0x%02X, calc=0x%02X\r\n",
            host_checksum, ota_total_checksum);
     return;
   }
@@ -297,14 +309,14 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
   /* 校验通过，写升级标志到 Flash */
   /* Bootloader 启动时会检查这个标志，如果存在则执行固件安装 */
   ota_flag_t flag;
-  flag.magic = OTA_FLAG_MAGIC;           /* 魔数，用于识别有效的升级标志 */
-  flag.total_checksum = host_checksum;   /* 总校验码 */
-  flag.total_packets = ota_total_packets;/* 总包数 */
-  flag.reserved = 0;                     /* 保留字段 */
+  flag.magic = OTA_FLAG_MAGIC;            /* 魔数，用于识别有效的升级标志 */
+  flag.total_checksum = host_checksum;    /* 总校验码 */
+  flag.total_packets = ota_total_packets; /* 总包数 */
+  flag.reserved = 0;                      /* 保留字段 */
 
   fmc_unlock();
-  fmc_page_erase(OTA_FLAG_ADDR);         /* 先擦除整页 */
-  fmc_word_program(OTA_FLAG_ADDR, flag.magic);           /* 写入魔数 */
+  fmc_page_erase(OTA_FLAG_ADDR);                            /* 先擦除整页 */
+  fmc_word_program(OTA_FLAG_ADDR, flag.magic);              /* 写入魔数 */
   fmc_word_program(OTA_FLAG_ADDR + 4, flag.total_checksum); /* 写入校验码 */
   fmc_word_program(OTA_FLAG_ADDR + 8, flag.total_packets);  /* 写入包数 */
   fmc_word_program(OTA_FLAG_ADDR + 12, flag.reserved);      /* 写入保留字段 */
@@ -312,8 +324,7 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
 
   ota_state = OTA_STATE_IDLE; /* 回到空闲状态 */
 
-  uint8_t rsp_data[1] = {OTA_OK};
-  ota_send_response(OTA_CMD_FINISH, OTA_OK, rsp_data, 1);
+  ota_send_response(OTA_CMD_FINISH, OTA_OK, NULL, 0);
   printf("[OTA] upgrade finish OK, reboot to install\r\n");
 }
 
@@ -321,83 +332,133 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
 /* 上位机发送此命令查询当前固件版本，用于判断是否需要升级 */
 void ota_handle_version(uint8_t *frame, uint8_t len) {
   const char *ver = ota_get_version();
-  ota_send_response(OTA_CMD_VERSION, OTA_OK, (const uint8_t *)ver, OTA_VERSION_LEN);
+  ota_send_response(OTA_CMD_VERSION, OTA_OK, (const uint8_t *)ver,
+                    OTA_VERSION_LEN);
 }
 
 /* ========== 协议解析入口（逐字节调用） ========== */
-/*
- * 功能：从串口逐字节接收数据，解析出完整的帧
- * 状态机：
- *   状态 0：等待帧头 0xAA
- *   状态 1：接收帧长（1 字节）
- *   状态 2：接收数据（帧长 + 校验码）
+/**
+ * @brief  OTA 协议帧解析状态机（逐字节处理）
+ * @param  byte  从串口接收到的单个字节
+ * @note   该函数需在串口接收中断或主循环中被调用，每收到一个字节调用一次。
+ *         内部使用静态变量维护解析状态，支持异步流式解析，无需等待完整帧再处理。
  *
- * 调用方式：在串口接收中断或主循环中，每收到一个字节就调用一次
+ * 【状态机流程】
+ *   状态 0 (OTA_PARSE_IDLE)：等待帧头 0xAA
+ *   状态 1 (OTA_PARSE_LEN)：接收帧长字节
+ *   状态 2 (OTA_PARSE_DATA)：接收功能码、数据域及校验码
+ *
+ * 【帧格式】
+ *   [帧头 1B] [帧长 1B] [功能码 1B] [数据 N 字节] [校验码 1B]
+ *   - 帧头：固定 0xAA
+ *   - 帧长：功能码 + 数据域 + 校验码 的总字节数
+ *   - 校验范围：从帧长字节开始，共 frame_len 字节，逐字节异或后取反
+ *
+ * 【错误处理】
+ *   - 帧头不匹配：保持在状态 0 继续等待
+ *   - 缓冲区溢出：重置状态机，丢弃当前帧
+ *   - 校验失败：打印错误日志，丢弃当前帧
+ *   - 未知功能码：静默忽略，不执行任何操作
  */
 void ota_protocol_parse(uint8_t byte) {
   switch (parse_state) {
-    case 0: /* 等待帧头 0xAA */
-      if (byte == OTA_HEAD) {
-        parse_buf[0] = byte;
-        parse_idx = 1;
-        parse_state = 1;
-      }
-      break;
 
-    case 1: /* 收帧长 */
-      parse_buf[1] = byte;
-      parse_idx = 2;
-      parse_state = 2;
-      break;
+  /* ---------- 状态 0：等待帧头 ---------- */
+  case 0:
+    /* 检测到帧头 0xAA，开始新一帧的接收 */
+    if (byte == OTA_HEAD) {
+      parse_buf[0] = byte;  /* 保存帧头 */
+      parse_idx = 1;        /* 索引指向下一写入位置 */
+      parse_state = 1;      /* 进入帧长接收状态 */
+    }
+    /* 非帧头字节直接丢弃，继续等待 */
+    break;
 
-    case 2: /* 收数据（帧长 + 校验码） */
-      if (parse_idx < sizeof(parse_buf)) {
-        parse_buf[parse_idx++] = byte;
-        uint8_t frame_len = parse_buf[1]; /* 帧长字节 */
-        /* 判断帧是否收完整：2(帧头+帧长) + 帧长 */
-        if (parse_idx >= (uint16_t)(2 + frame_len)) {
-          /* 帧收完整，开始处理 */
-          uint8_t func_code = parse_buf[2];          /* 功能码 */
-          uint8_t recv_cs = parse_buf[parse_idx - 1]; /* 接收到的校验码 */
-          uint8_t calc_cs = ota_calc_checksum(&parse_buf[1], frame_len); /* 计算的校验码 */
+  /* ---------- 状态 1：接收帧长 ---------- */
+  case 1:
+    parse_buf[1] = byte;  /* 保存帧长字节 */
+    parse_idx = 2;        /* 索引指向数据域起始位置 */
+    parse_state = 2;      /* 进入数据接收状态 */
+    break;
 
-          if (recv_cs == calc_cs) {
-            /* 校验通过，分发命令 */
-            switch (func_code) {
-              case OTA_CMD_START:
-                ota_handle_start(parse_buf, parse_idx);
-                break;
-              case OTA_CMD_WRITE:
-                ota_handle_write(parse_buf, parse_idx);
-                break;
-              case OTA_CMD_FINISH:
-                ota_handle_finish(parse_buf, parse_idx);
-                break;
-              case OTA_CMD_VERSION:
-                ota_handle_version(parse_buf, parse_idx);
-                break;
-              default:
-                break;
-            }
-          } else {
-            printf("[OTA] checksum error\r\n");
-          }
+  /* ---------- 状态 2：接收数据域及校验码 ---------- */
+  case 2:
+    /* 缓冲区溢出保护：防止接收超长帧导致内存越界 */
+    if (parse_idx < sizeof(parse_buf)) {
+      parse_buf[parse_idx++] = byte;  /* 存入接收缓冲区 */
 
-          /* 重置解析状态，准备接收下一帧 */
-          parse_state = 0;
-          parse_idx = 0;
-        }
+      /*
+       * 判断当前帧是否接收完整。
+       * ★ 注意：0xF1 数据帧的“帧长”字段固定为 0（协议规定），
+       *   不能用它判断帧完整性；0xF1 是定长帧，总长固定 518 字节。
+       *   其余命令帧（0xF0/0xF2/0xF3）帧长字段有效：
+       *   总帧长 = 帧头(1B) + 帧长(1B) + frame_len(功能码+数据+校验码) = 2 + frame_len
+       */
+      uint16_t expect_total; /* 本帧期望总长度 */
+      uint16_t cs_len;       /* 校验码计算长度（从帧长到数据末尾） */
+      if (parse_idx >= 3 && parse_buf[2] == OTA_CMD_WRITE) {
+        /* 0xF1 定长数据帧：AA + 帧长 + F1 + 包号2B + 数据512B + 校验码 = 518B */
+        expect_total = (uint16_t)(6U + OTA_PKT_DATA_SIZE); /* = 518 */
+        cs_len = (uint16_t)(4U + OTA_PKT_DATA_SIZE);       /* = 516：帧长+功能码+包号+数据 */
       } else {
-        /* 缓冲区溢出，重置 */
+        expect_total = (uint16_t)(2U + parse_buf[1]);
+        cs_len = parse_buf[1];
+      }
+
+      if (parse_idx >= expect_total) {
+        /* ===== 帧接收完成，进入处理阶段 ===== */
+        uint8_t func_code = parse_buf[2];           /* 功能码位于帧头、帧长之后 */
+        uint8_t recv_cs = parse_buf[parse_idx - 1]; /* 校验码始终是最后一个字节 */
+
+        /*
+         * 计算校验码：
+         * - 起始地址：&parse_buf[1]（从帧长字节开始）
+         * - 长度：cs_len（从帧长到数据末尾）
+         * - 算法：逐字节异或，最后取反
+         */
+        uint8_t calc_cs = ota_calc_checksum(&parse_buf[1], cs_len);
+
+        if (recv_cs == calc_cs) {
+          /* ----- 校验通过，根据功能码分发命令 ----- */
+          switch (func_code) {
+          case OTA_CMD_START:   /* 0xF0：开始升级 */
+            ota_handle_start(parse_buf, parse_idx);
+            break;
+          case OTA_CMD_WRITE:   /* 0xF1：写入固件数据 */
+            ota_handle_write(parse_buf, parse_idx);
+            break;
+          case OTA_CMD_FINISH:  /* 0xF2：结束升级 */
+            ota_handle_finish(parse_buf, parse_idx);
+            break;
+          case OTA_CMD_VERSION: /* 0xF3：查询版本号 */
+            ota_handle_version(parse_buf, parse_idx);
+            break;
+          default:
+            /* 未知功能码，静默丢弃，不回复 */
+            break;
+          }
+        } else {
+          /* 校验失败，记录日志以便调试 */
+          printf("[OTA] checksum error\r\n");
+        }
+
+        /* 无论处理成功与否，重置状态机准备接收下一帧 */
         parse_state = 0;
         parse_idx = 0;
       }
-      break;
-
-    default:
+    } else {
+      /* 缓冲区溢出：当前帧超长，强制重置状态机 */
       parse_state = 0;
       parse_idx = 0;
-      break;
+    }
+    break;
+
+  /* ---------- 异常状态恢复 ---------- */
+  default:
+    /* 状态机异常（如内存被篡改），强制复位到初始状态 */
+    parse_state = 0;
+    parse_idx = 0;
+    break;
   }
 }
 
@@ -432,7 +493,8 @@ uint8_t ota_check_pending_upgrade(void) {
  * 3. 清除升级标志
  * 4. 重启后跳转到新固件
  *
- * ★ 重要：只擦除 App 区（0x08001000-0x08007FFF），数据分区（0x0800E000 起始）绝对安全！
+ * ★ 重要：只擦除 App 区（0x08001000-0x08007FFF），数据分区（0x0800E000
+ * 起始）绝对安全！
  */
 void ota_install_firmware(void) {
   printf("[OTA] installing firmware...\r\n");
