@@ -2,6 +2,7 @@
 *.uvguix*
 *.uvopt
 *.uvoptx
+*.uvgui.*
 
 # Keil MDK - 编译输出
 output/
@@ -16,11 +17,24 @@ output/
 *.axf
 *.bin
 *.elf
+*.map
+*.lst
+*.bak
+*_sct.Bak
+ArInp.Scr
+Project.lib
+Project.lnp
+
+# 手写的旧 scatter 文件（Keil 用 Target Dialog 自动生成，勿提交顶层手写 sct）
+# 注意：output/ 下的自动生成 sct 由上面 output/ 规则统一忽略
+Template/Keil5_project/bootloader.sct
 
 # IDE / 编辑器
 .vscode/
 .cache/
 .idea/
+*.log
+*.log.lock
 
 # 编译命令数据库
 compile_commands.json
