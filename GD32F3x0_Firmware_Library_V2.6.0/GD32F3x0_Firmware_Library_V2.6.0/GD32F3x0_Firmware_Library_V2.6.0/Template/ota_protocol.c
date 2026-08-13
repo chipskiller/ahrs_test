@@ -16,10 +16,10 @@
 
     【Flash 分区布局】
     ┌─────────────────────────────────────────────────────────────┐
-    │ 0x08000000 - 0x08000FFF  Bootloader (4KB)                   │
-    │ 0x08001000 - 0x08007FFF  App 运行区 (32KB) ← 你的固件       │
-    │ 0x08008000 - 0x0800DFFF  下载区 (24KB) ← OTA 临时存放新固件 │
-    │ 0x0800E000 - 0x0801FFFF  数据分区 (~80KB) ← 保存 yaw 等数据│
+    │ 0x08000000 - 0x08001FFF  Bootloader (8KB)                   │
+    │ 0x08002000 - 0x08008FFF  App 运行区 (28KB) ← 你的固件       │
+    │ 0x08009000 - 0x0800FFFF  下载区 (28KB) ← OTA 临时存放新固件 │
+    │ 0x08010000 - 0x0801FFFF  数据分区 (64KB) ← 保存 yaw 等数据│
     └─────────────────────────────────────────────────────────────┘
     ★ 重要：OTA 升级时只擦除 App 区，数据分区绝对安全！
 
@@ -362,7 +362,9 @@ void ota_handle_finish(uint8_t *frame, uint8_t len) {
   //printf("[OTA] upgrade finish OK, reboot to install\r\n");
 
   /* ★ 关键：写标志完成后，软件复位，让 Bootloader 重新启动并安装固件 */
-  delay_us(1000);      /* 等回复帧发完（可选，确保上位机收到） */
+  /* 等发送完成（TC = Transmission Complete）：阻塞发送只等 TBE（数据进移位寄存器），
+     最后一位可能还在 TX 引脚上移出；复位前必须等 TC，避免截断回复帧最后一个字节 */
+  while (RESET == usart_flag_get(USART0, USART_FLAG_TC));
   NVIC_SystemReset(); /* 软件复位，等效于上电 */
 }
 
