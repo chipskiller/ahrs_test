@@ -61,9 +61,9 @@ void angle_send(float pitch, float roll, float yaw, uint8_t mag_disturb_flag) {
   buf[idx++] = (uint8_t)((uint16_t)(fabsf(yaw) * 100) & 0xFF);
 
   buf[idx++] = mag_disturb_flag ? 1 : 0; // if_mag_disturb_
-  buf[idx++] =
-      (uint8_t)((uint16_t)(icm_raw.temp * 100) >> 8); // 温度值，单位摄氏度
-  buf[idx++] = (uint8_t)((uint16_t)(icm_raw.temp * 100) & 0xFF);
+  // buf[idx++] =
+  //     (uint8_t)((uint16_t)(icm_raw.temp * 100) >> 8); // 温度值，单位摄氏度
+  // buf[idx++] = (uint8_t)((uint16_t)(icm_raw.temp * 100) & 0xFF);
   // ---- 计算并填充帧长 & 校验码 ----
   uint8_t frame_len = (uint8_t)(idx - 1); // 从 len_ 到最后一个数据字节数
   buf[1] = frame_len;                     // 填入 len_
