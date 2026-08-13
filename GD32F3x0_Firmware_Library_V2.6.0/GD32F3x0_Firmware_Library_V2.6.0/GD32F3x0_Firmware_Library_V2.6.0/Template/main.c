@@ -71,7 +71,6 @@ __IO uint8_t txcount = 0;
 __IO uint16_t rxcount = 0;
 
 /************************ USART0 DMA + 空闲中断接收 ************************/
-#define USART0_RX_BUF_SIZE 256U
 uint8_t usart0_rx_buffer[USART0_RX_BUF_SIZE];
 volatile uint16_t usart0_rx_len = 0;
 volatile uint8_t usart0_rx_flag = 0;
@@ -1058,6 +1057,10 @@ int main(void) {
         uint8_t rx_cmd = usart0_rx_buffer[2];
         if (rx_cmd >= 0xF0) {
           /* OTA 远程烧录协议 */
+          // printf("[DBG] ota_rx: len=%u b=%02X %02X %02X %02X %02X %02X\r\n",
+          //        usart0_rx_len, usart0_rx_buffer[0], usart0_rx_buffer[1],
+          //        usart0_rx_buffer[2], usart0_rx_buffer[3], usart0_rx_buffer[4],
+          //        usart0_rx_buffer[5]);
           for (uint16_t i = 0; i < usart0_rx_len; i++) {
             ota_protocol_parse(usart0_rx_buffer[i]);
           }

@@ -49,7 +49,7 @@ extern uint8_t  usart0_rx_buffer[];
 extern volatile uint16_t usart0_rx_len;
 extern volatile uint8_t  usart0_rx_flag;
 extern volatile uint8_t  usart0_tx_busy;
-#define USART0_RX_BUF_SIZE  256U
+/* USART0_RX_BUF_SIZE 统一在 main.h 定义（勿在此重复定义，避免与 main.c 不同步） */
 
 /*!
     \brief      this function handles NMI exception
@@ -197,6 +197,9 @@ void USART0_IRQHandler(void)
 
             /* 数据在 buffer[0..received-1]，重新配置 DMA 准备下一帧 */
             dma_channel_disable(DMA_CH2);
+            /* ★ 必须重置内存地址到缓冲区头：单次模式 DMA 收完一帧后地址已前移，
+               只重设计数不重置地址会让下一帧写到错误偏移，解析到脏数据 */
+            dma_memory_address_config(DMA_CH2, (uint32_t)usart0_rx_buffer);
             dma_transfer_number_config(DMA_CH2, USART0_RX_BUF_SIZE);
             dma_channel_enable(DMA_CH2);
         }

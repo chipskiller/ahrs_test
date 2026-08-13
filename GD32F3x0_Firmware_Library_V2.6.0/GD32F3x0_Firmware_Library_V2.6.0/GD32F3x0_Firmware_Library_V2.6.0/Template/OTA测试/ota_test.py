@@ -216,7 +216,16 @@ class OTAClient:
 
         buf = bytearray()
         deadline = time.time() + timeout
-        noise_count = 0
+        noise_buf = bytearray()  # 用于收集噪声字节（printf 输出）
+
+        def _flush_noise():
+            """将收集的噪声字节作为 ASCII 文本显示"""
+            nonlocal noise_buf
+            if noise_buf:
+                text = bytes(noise_buf).decode('ascii', errors='replace').rstrip('\r\n')
+                if text.strip():
+                    print(f"  \033[36m[DEV]\033[0m {text}")
+                noise_buf.clear()
 
         while time.time() < deadline:
             # 读取当前所有可用字节到缓冲区
@@ -229,14 +238,16 @@ class OTAClient:
                 # 查找帧头 0x55
                 idx = buf.find(bytes([OTA_RSP_HEAD]))
                 if idx < 0:
-                    # 缓冲区中没有 0x55，全部丢弃
-                    noise_count += len(buf)
+                    # 缓冲区中没有 0x55，全部当作 printf 输出
+                    noise_buf.extend(buf)
+                    _flush_noise()
                     buf.clear()
                     break
 
                 if idx > 0:
-                    # 丢弃 0x55 之前的噪声
-                    noise_count += idx
+                    # 0x55 之前的字节是 printf 输出
+                    noise_buf.extend(buf[:idx])
+                    _flush_noise()
                     del buf[:idx]
 
                 # 现在 buf[0] == 0x55
@@ -247,7 +258,8 @@ class OTAClient:
 
                 # 帧长合理性检查（最小3=cmd+status+cs，最大22=版本回复）
                 if frame_len < 3 or frame_len > 22:
-                    noise_count += 1
+                    noise_buf.append(buf[0])
+                    _flush_noise()
                     del buf[:1]  # 跳过这个假 0x55，继续搜索
                     continue
 
@@ -262,21 +274,21 @@ class OTAClient:
                 recv_cs = candidate[-1]
                 calc_cs = calc_checksum(candidate[1:-1])
                 if recv_cs != calc_cs:
-                    noise_count += 1
+                    noise_buf.append(buf[0])
+                    _flush_noise()
                     del buf[:1]  # 跳过这个假 0x55
                     continue
 
                 # 功能码匹配验证
                 resp_cmd = candidate[2]
                 if expected_cmd is not None and resp_cmd != expected_cmd:
-                    noise_count += 1
+                    noise_buf.append(buf[0])
+                    _flush_noise()
                     del buf[:1]  # 跳过这个假 0x55
                     continue
 
                 # 所有验证通过！
                 del buf[:expected_total]
-                if noise_count > 0:
-                    logger.info(f"（已过滤 {noise_count} 字节 printf 噪声）")
                 logger.debug(f"RX ({expected_total}B): {hex_dump(candidate)}")
 
                 result = parse_response(candidate)
@@ -289,10 +301,8 @@ class OTAClient:
                 # 有数据但帧不完整，短暂等待
                 time.sleep(0.005)
 
-        if noise_count > 0:
-            logger.warning(f"等待回复超时（期间过滤了 {noise_count} 字节噪声）")
-        else:
-            logger.warning("等待回复超时")
+        _flush_noise()
+        logger.warning("等待回复超时")
         return None
 
     def query_version(self) -> str | None:

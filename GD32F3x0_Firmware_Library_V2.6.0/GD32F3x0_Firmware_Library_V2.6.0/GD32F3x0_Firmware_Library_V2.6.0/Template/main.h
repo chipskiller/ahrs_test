@@ -46,6 +46,10 @@ OF SUCH DAMAGE.
 #include <stdint.h>
 #include "flash.h"
 
+/* USART0 DMA 接收缓冲区大小（main.c 与 gd32f3x0_it.c 共用，勿在两个文件重复定义）
+   必须 ≥ 最大一帧：OTA 0xF1 数据帧 = 518 字节 */
+#define USART0_RX_BUF_SIZE 1024U
+
 typedef struct {
   float w, x, y, z;
 } quaternion_t;
