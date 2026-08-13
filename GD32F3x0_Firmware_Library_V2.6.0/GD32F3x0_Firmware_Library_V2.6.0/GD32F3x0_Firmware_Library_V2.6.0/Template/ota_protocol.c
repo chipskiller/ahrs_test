@@ -36,15 +36,14 @@
 */
 
 #include "ota_protocol.h"
+#include "main.h" /* FW_VERSION 宏定义在 main.h，需在此包含才能使用 */
 #include "gd32f3x0_fmc.h"
 #include "gd32f3x0_usart.h"
 #include "systick.h"
 #include <stdio.h>
 #include <string.h>
 
-/* ========== 固件版本号 ========== */
-/* 上位机通过对比版本号判断是否需要升级，版本相同则拒绝升级 */
-#define FW_VERSION "AHRS_V2.0.2_beta"
+/* FW_VERSION 是宏（定义在 main.h），编译前已替换为字符串字面量，无需 extern 声明 */
 
 /* ========== Flash 地址定义 ========== */
 /* 这些地址必须与 flash.h 中的分区定义保持一致 */

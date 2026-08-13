@@ -50,6 +50,10 @@ OF SUCH DAMAGE.
    必须 ≥ 最大一帧：OTA 0xF1 数据帧 = 518 字节 */
 #define USART0_RX_BUF_SIZE 1024U
 
+/* ========== 固件版本号 ========== */
+/* 上位机通过对比版本号判断是否需要升级，版本相同则拒绝升级 */
+#define FW_VERSION "AHRS_V2.0.3_beta"
+
 typedef struct {
   float w, x, y, z;
 } quaternion_t;
