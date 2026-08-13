@@ -973,6 +973,7 @@ static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data) {
 // }
 
 int main(void) {
+
   /* App 链接在 0x08002000（bootloader 之后），启动必须把中断向量表重定位到 App 区 */
   SCB->VTOR = 0x08002000U;
 
@@ -982,6 +983,7 @@ int main(void) {
 
   systick_config();
   com_usart_init();
+  printf("%x",main);
   printf("[APP] started\r\n");
 
 
