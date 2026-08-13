@@ -38,6 +38,43 @@ void flash_write(uint32_t addr, void *data, uint16_t len) {
   fmc_lock();
 }
 
+/* ========== 页内安全写入（读-改-擦-写，保护同页其它数据） ========== */
+/*
+ * 功能：向某一页内的指定偏移写入数据，同时保留同页其它数据不被破坏。
+ * 原理：Flash 最小擦除单位是整页（1KB），而零点/报警/陀螺零偏共处第 63 页。
+ *       直接 fmc_page_erase 会误伤同页其它数据，故先读整页到 RAM → 改目标区
+ *       → 擦整页 → 整页重写。
+ * 参数：
+ *   addr - 目标写入地址（须在数据分区）
+ *   data - 待写入数据
+ *   len  - 数据长度（字节）
+ */
+static void flash_page_update(uint32_t addr, const void *data, uint16_t len) {
+  /* 数据区段：零点A/B + 陀螺 + 报警 连续存放（共约 156B），远小于整页 1KB。
+     故只需缓存这一段（栈 1KB 足够，无需 static），不必缓存整页。 */
+  const uint32_t base = FLASH_ZONE_A; /* 段起始 = 第 63 页内最早的数据地址 */
+  const uint32_t seg_len = (FLASH_ALARM_CFG - base) + sizeof(alarm_config_t);
+  uint8_t seg[160]; /* 156B 实际数据 + 余量；局部数组，栈 1KB 放得下 */
+
+  /* 1. 读数据段到缓存（未写过的区域是 0xFF） */
+  memcpy(seg, (void *)base, seg_len);
+
+  /* 2. 用新数据覆盖目标区 */
+  memcpy(seg + (addr - base), data, len);
+
+  /* 3. 擦整页，再只重写数据段（未使用的 0xFF 区域跳过，省时间） */
+  fmc_unlock();
+  fmc_page_erase(base);
+  for (uint16_t i = 0; i < seg_len; i += 4) {
+    uint32_t word;
+    memcpy(&word, &seg[i], 4);
+    if (word != 0xFFFFFFFFU) {
+      fmc_word_program(base + i, word);
+    }
+  }
+  fmc_lock();
+}
+
 /* ========== 外部辅助函数声明 ========== */
 extern void icm42670_get_raw_data(void);
 extern void attitude_calc_6axis(float ax, float ay, float az, float gx,
@@ -64,24 +101,11 @@ int save_install_zero_point(void) {
   att.roll_base = rol_sum / 500.0f;
   gyro_bias.temp_ref = icm_raw.temp;
 
-  /* 零点数据写入第 63 页（A/B 双备份 + 陀螺零偏，同页内一次擦除） */
-  fmc_unlock();
-  fmc_page_erase(FLASH_ZONE_A);
-  fmc_word_program(FLASH_ZONE_A, ((uint32_t *)&att)[0]);
-  fmc_word_program(FLASH_ZONE_A + 4, ((uint32_t *)&att)[1]);
-  fmc_word_program(FLASH_ZONE_A + 8, ((uint32_t *)&att)[2]);
-  fmc_word_program(FLASH_ZONE_A + 12, ((uint32_t *)&att)[3]);
-  fmc_word_program(FLASH_ZONE_A + 16, ((uint32_t *)&att)[4]);
-  fmc_word_program(FLASH_ZONE_A + 20, ((uint32_t *)&att)[5]);
-  fmc_word_program(FLASH_ZONE_B, ((uint32_t *)&att)[0]);
-  fmc_word_program(FLASH_ZONE_B + 4, ((uint32_t *)&att)[1]);
-  fmc_word_program(FLASH_ZONE_B + 8, ((uint32_t *)&att)[2]);
-  fmc_word_program(FLASH_ZONE_B + 12, ((uint32_t *)&att)[3]);
-  fmc_word_program(FLASH_ZONE_B + 16, ((uint32_t *)&att)[4]);
-  fmc_word_program(FLASH_ZONE_B + 20, ((uint32_t *)&att)[5]);
-  fmc_word_program(FLASH_GYRO_BIAS, ((uint32_t *)&gyro_bias)[0]);
-  fmc_word_program(FLASH_GYRO_BIAS + 4, ((uint32_t *)&gyro_bias)[1]);
-  fmc_lock();
+  /* 零点数据写入第 63 页（A/B 双备份 + 陀螺零偏，用页内"读-改-擦-写"保护，
+     不会破坏同页的报警参数） */
+  flash_page_update(FLASH_ZONE_A, &att, sizeof(attitude_info_t));
+  flash_page_update(FLASH_ZONE_B, &att, sizeof(attitude_info_t));
+  flash_page_update(FLASH_GYRO_BIAS, &gyro_bias, sizeof(gyro_bias_t));
 
   /* 读回校验 */
   attitude_info_t bak_a, bak_b;
@@ -122,8 +146,6 @@ void load_install_zero_point(void) {
 int save_alarm_config(void) {
   alarm_config_t cfg;
   alarm_config_t verify;
-  uint32_t *p;
-  uint8_t i;
 
   cfg.roll_mild = roll_mild_threshold;
   cfg.pitch_mild = pitch_mild_threshold;
@@ -134,13 +156,8 @@ int save_alarm_config(void) {
   cfg.warning_time = alarm_warning_time;
   cfg.reserved = 0;
 
-  fmc_unlock();
-  fmc_page_erase(FLASH_ALARM_CFG);
-  p = (uint32_t *)&cfg;
-  for (i = 0; i < sizeof(alarm_config_t) / 4; i++) {
-    fmc_word_program(FLASH_ALARM_CFG + i * 4, p[i]);
-  }
-  fmc_lock();
+  /* 报警参数写入第 63 页，用页内"读-改-擦-写"保护，不破坏同页零点/陀螺数据 */
+  flash_page_update(FLASH_ALARM_CFG, &cfg, sizeof(alarm_config_t));
 
   flash_read(FLASH_ALARM_CFG, (void *)&verify, sizeof(alarm_config_t));
   if (memcmp(&cfg, &verify, sizeof(alarm_config_t)) != 0)
