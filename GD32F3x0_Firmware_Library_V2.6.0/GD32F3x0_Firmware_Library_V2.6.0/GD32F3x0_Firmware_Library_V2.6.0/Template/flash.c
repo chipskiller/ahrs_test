@@ -86,19 +86,21 @@ extern void delay_1ms(uint32_t ms);
 int save_install_zero_point(void) {
   float yaw_sum = 0.0f, pit_sum = 0.0f, rol_sum = 0.0f;
 
-  for (uint16_t i = 0; i < 500; i++) {
+  /* 采样间隔须与姿态解算 DT(0.004s=250Hz) 一致，否则积分倍数错误。
+     250Hz 下 1250 帧 × 4ms = 5 秒，与主循环节奏相同 */
+  for (uint16_t i = 0; i < 1250; i++) {
     icm42670_get_raw_data();
     attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
                         icm_raw.gy, icm_raw.gx, icm_raw.temp);
     yaw_sum += att.yaw_now;
     pit_sum += att.pitch;
     rol_sum += att.roll;
-    delay_1ms(10);
+    delay_1ms(4);
   }
 
-  att.yaw_base = yaw_sum / 500.0f;
-  att.pitch_base = pit_sum / 500.0f;
-  att.roll_base = rol_sum / 500.0f;
+  att.yaw_base = yaw_sum / 1250.0f;
+  att.pitch_base = pit_sum / 1250.0f;
+  att.roll_base = rol_sum / 1250.0f;
   gyro_bias.temp_ref = icm_raw.temp;
 
   /* 零点数据写入第 63 页（A/B 双备份 + 陀螺零偏，用页内"读-改-擦-写"保护，
@@ -277,8 +279,10 @@ void load_yaw_from_flash(void) {
 
       /* 合法性校验 */
       if (!isnan(saved_yaw) && saved_yaw >= -180.0f && saved_yaw <= 180.0f) {
+        /* 只恢复断电前航向角 yaw_now；
+           不能覆盖 yaw_base —— 安装零点由 load_install_zero_point() 从
+           FLASH_ZONE_A 恢复，若在此改写会导致标定零位每次上电丢失 */
         att.yaw_now = saved_yaw;
-        att.yaw_base = saved_yaw;
         printf("[YAW-FLASH] load OK slot=%d yaw=%.2f\r\n", i, saved_yaw);
       } else {
         printf("[YAW-FLASH] load FAIL slot=%d invalid value=%.2f\r\n", i,
