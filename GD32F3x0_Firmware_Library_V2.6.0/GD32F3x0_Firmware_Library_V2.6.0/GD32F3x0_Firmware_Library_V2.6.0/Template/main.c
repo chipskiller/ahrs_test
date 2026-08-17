@@ -10,11 +10,13 @@
 #include <stdint.h>
 
 /* ========== 禁用半主机（semihosting）==========
-   标准 C 库的 printf 首次调用会走 semihosting（执行 BKPT 0xAB 请求调试器服务），
-   没有调试器连接时触发 HardFault（HFSR.DEBUGEVT=1）。
+   标准 C 库的 printf 首次调用会走 semihosting（执行 BKPT 0xAB
+   请求调试器服务）， 没有调试器连接时触发 HardFault（HFSR.DEBUGEVT=1）。
    __use_no_semihosting 让链接器改用不含半主机的库版本，并保留浮点 %f 支持。 */
 #pragma import(__use_no_semihosting)
-struct __FILE { int handle; };
+struct __FILE {
+  int handle;
+};
 FILE __stdout;
 void _sys_exit(int x) { x = x; }
 void _ttywrch(int ch) { (void)ch; }
@@ -23,9 +25,10 @@ void _ttywrch(int ch) { (void)ch; }
    禁用半主机后必须自行提供 fputc，否则链接器会用 C 库自带的半主机版 fputc，
    导致 L6915E：__use_no_semihosting 与半主机 fputc 冲突。 */
 int fputc(int ch, FILE *f) {
-    usart_data_transmit(USART0, (uint8_t)ch);
-    while(RESET == usart_flag_get(USART0, USART_FLAG_TBE));
-    return ch;
+  usart_data_transmit(USART0, (uint8_t)ch);
+  while (RESET == usart_flag_get(USART0, USART_FLAG_TBE))
+    ;
+  return ch;
 }
 
 #define delay_ms(x) delay_1ms(x)
@@ -41,8 +44,14 @@ int fputc(int ch, FILE *f) {
 #define I2C_TIMEOUT 10000U // I2C通信超时计数（与hard_i2c.h保持一致）
 
 // 采样与报警配置
-#define DT 0.01f                  // 10ms采样周期 100Hz
+#define DT 0.004f                  // 4ms采样周期 250Hz
 #define MAG_DISTURB_THRESH 120.0f // 地磁突变判定阈值
+
+// 静止检测阈值（原始值判断，随温度自适应缩放）
+#define STABLE_THRESH_BASE 1.3f        // 基础阈值(°/s)：覆盖25°C初始零偏±1°/s
+#define STABLE_THRESH_TEMP_COEFF 0.02f // 温度系数(°/s/°C)：手册0.015，留余量
+#define STABLE_THRESH_MAX 5.0f         // 阈值上限(°/s)，防极端温度下阈值过大
+#define ZRO_TEMP_REF 25.0f // 手册零偏参考温度(°C)：温漂系数以25°C为基准
 
 /************************ 全局数据结构体 ************************/
 
@@ -56,7 +65,7 @@ quaternion_t quat;
 uint8_t day_mode = 1;                 // 1=白天6轴模式 0=夜间9轴融合
 uint8_t mag_disturb_flag = 0;         // 地磁受大车干扰标记
 uint8_t fault_type = 0;               // 偏转报警类型标记
-static uint16_t alarm_filter_cnt = 0; // 报警防抖计数器
+static uint32_t alarm_filter_cnt = 0; // 报警防抖计数器（帧计数，需32位）
 uint32_t stable_cnt;
 volatile uint8_t imu_loop_flag = 0; // 定时器中断标志
 
@@ -277,22 +286,22 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static uint16_t init_cnt = 0;                             // 初始对准采样计数
   static float ix = 0.0f, iy = 0.0f, iz = 0.0f; // Mahony PI 控制器积分项
   static int temp_stable_cnt = 0;               // 温度稳定计数器
-  static float last_temp = 0.0f;                // 上次温度值
+  static float last_temp = 0;                   // 上次温度值
   static int temp_diff_flag = 0;                // 温度变化标志
-  // ====== 阶段1：初始对准（前100次采样，约1秒） ======
+  // ====== 阶段1：初始对准（前1250次采样，约5秒） ======
   if (first_run) {
     gx_sum += gx;
     gy_sum += gy;
     gz_sum += gz;
     init_cnt++;
 
-    if (init_cnt >= 500) {
-      // 100次采样完成，求均值作为陀螺静态零偏
-      gx_bias = gx_sum / 500.0f;
-      gy_bias = gy_sum / 500.0f;
-      gyro_bias.gz_bias = gz_sum / 500.0f;
+    if (init_cnt >= 1250) {       // 250Hz下1250帧=5秒初始对准
+      // 1250次采样完成，求均值作为陀螺静态零偏
+      gx_bias = gx_sum / 1250.0f;
+      gy_bias = gy_sum / 1250.0f;
+      gyro_bias.gz_bias = gz_sum / 1250.0f;
       gyro_bias.temp_ref = temp;
-
+      last_temp = temp;
       // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
       float accel_pitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 57.3f;
       float accel_roll = atan2f(ay, az) * 57.3f;
@@ -314,11 +323,20 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float gx_comp = gx - gx_bias;
   float gy_comp = gy - gy_bias;
   float gz_comp = gz - gyro_bias.gz_bias;
-  // ====== 阶段3：静止检测 ======
-  static uint16_t stable_cnt = 0;                // 连续静止采样计数
-  uint8_t is_stable = (fabsf(gx_comp) < 0.6f) && // 三轴角速度均 < 2°/s
-                      (fabsf(gy_comp) < 0.6f) && // 判定为静止状态
-                      (fabsf(gz_comp) < 0.6f);
+  // ====== 阶段3：静止检测（原始值 + 温度自适应阈值） ======
+  // 阈值随温度缩放：|T - 25°C| 越大，温漂零偏可能越大，阈值相应放宽。
+  // 用原始值判静止需覆盖手册零偏包络 ZRO(T)=ZRO(25°C)+0.015*(T-25)，
+  // 保证静止设备不会因零偏随温度漂移而被误判为运动（避免零偏更新死锁）。
+  float stable_thresh = STABLE_THRESH_BASE +
+                        STABLE_THRESH_TEMP_COEFF * fabsf(temp - ZRO_TEMP_REF);
+  if (stable_thresh > STABLE_THRESH_MAX) {
+    stable_thresh = STABLE_THRESH_MAX;
+  }
+
+  static uint16_t stable_cnt = 0;                    // 连续静止采样计数
+  uint8_t is_stable = (fabsf(gx) < stable_thresh) && // 三轴原始角速度均低于
+                      (fabsf(gy) < stable_thresh) && // 温度自适应阈值才判静止
+                      (fabsf(gz) < stable_thresh);
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
@@ -326,9 +344,10 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   } else {
     stable_cnt = 0;
     // 运动时清零 Mahony 积分项，防止积分饱和
-    ix = 0.0f;
-    iy = 0.0f;
-    iz = 0.0f;
+    ix *=
+        0.9980f; // 运动时指数衰减积分项（250Hz折算，保持每秒衰减~0.6）
+    iy *= 0.9980f;
+    iz *= 0.9980f;
   }
 
   // ====== 阶段4：陀螺积分 → 四元数增量（一阶龙格库塔法） ======
@@ -377,8 +396,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   // ====== 阶段5：加速度计 Mahony 互补滤波修正（仅修正 pitch/roll） ======
   float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
-  // 条件：连续静止 > 100ms 且加速度模长接近 1g（排除剧烈运动干扰）
-  if (stable_cnt > 10 && acc_norm > 0.9f && acc_norm < 1.1f) {
+  // 条件：连续静止 > 100ms（250Hz下25帧）且加速度模长接近 1g（排除剧烈运动干扰）
+  if (stable_cnt > 25 && acc_norm > 0.9f && acc_norm < 1.1f) {
     float ax_n = ax / acc_norm; // 归一化加速度
     float ay_n = ay / acc_norm;
     float az_n = az / acc_norm;
@@ -394,8 +413,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     float ez = ax_n * vy - ay_n * vx;
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
-    const float Kp = 20.0f; // 比例增益 0.5
-    const float Ki = 0.001f;  // 积分增益 0.001
+    const float Kp = 5.0f;    // 比例增益（τ=1/Kp≈0.2s，与采样率无关）
+    const float Ki = 0.0012f; // 积分增益（按250Hz折算：0.003×100/250）
     ix += ex * Ki;
     iy += ey * Ki;
     iz += ez * Ki;
@@ -448,8 +467,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
   temp_stable_cnt++;
-  if (temp_stable_cnt % 300 == 0) { // 每次加速纠正零偏持续30s
-    if (fabsf(temp - last_temp) >= 0.5f) {
+  if (temp_stable_cnt % 7500 == 0) { // 250Hz下7500帧=30s，检测温度变化
+    if (fabsf(temp - last_temp) >= 0.3f) {
       last_temp = temp;
       temp_stable_cnt = 0;
       temp_diff_flag = 1;
@@ -457,19 +476,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
       temp_diff_flag = 0;
     }
   }
-  if (stable_cnt > 500 || temp_diff_flag) {
-    // 指数滑动平均跟踪零偏漂移，时间常数 τ ≈ 10s
-    float stable_alpha = 0.01f; // 10s时间常数
-    float fast_alpha = 0.1f;    // 温度漂移修正更快
-    if (stable_cnt > 500) {
-      gx_bias = gx_bias * (1 - stable_alpha) + gx * stable_alpha;
-      gy_bias = gy_bias * (1 - stable_alpha) + gy * stable_alpha;
-      gyro_bias.gz_bias = gyro_bias.gz_bias * (1 - stable_alpha) + gz * stable_alpha;
-    } else if (stable_cnt > 500 && temp_diff_flag) {
-      gx_bias = gx_bias * (1 - fast_alpha) + gx * fast_alpha;
-      gy_bias = gy_bias * (1 - fast_alpha) + gy * fast_alpha;
-      gyro_bias.gz_bias = gyro_bias.gz_bias * (1 - fast_alpha) + gz * fast_alpha;
-    }
+  if (stable_cnt > 1250) {
+    float alpha = temp_diff_flag ? 0.1f : 0.001f; // 快修正 / 慢修正
+    gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
+    gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
+    gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
   } else {
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
     att.yaw_now += gz_comp * DT;
@@ -561,10 +572,10 @@ void update_day_night_mode(uint8_t rtc_hour) {
     day_mode = 0;
 }
 
-/************************ 主循环调度函数（10ms定时调用）
+/************************ 主循环调度函数（4ms定时调用）
  * ************************/
 /**
- * @brief 定时10ms执行一次，传入RTC当前小时
+ * @brief 定时4ms执行一次（250Hz），传入RTC当前小时
  */
 void imu_main_loop(uint8_t rtc_hour) {
   // 更新昼夜工作模式
@@ -577,7 +588,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   qmc5883p_get_raw_data();
   static int16_t loop_cnt = 0;
   loop_cnt++;
-  if (loop_cnt % 10 == 0) {
+  if (loop_cnt % 25 == 0) {  // 250Hz下每25帧=100ms检测一次地磁
     // 检测前后地磁向量模长，参数值判断磁场是否被干扰
     mag_disturb_detect();
   } else {
@@ -613,7 +624,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   }
 
   // 防抖滤波（预警时间可运行时修改）
-  uint16_t alarm_time_max = alarm_warning_time * 100;
+  uint32_t alarm_time_max = alarm_warning_time * 250; // 250Hz下每秒250帧
   if (alarm_level != 0x00) {
     alarm_filter_cnt++;
     if (alarm_filter_cnt > alarm_time_max) {
@@ -646,7 +657,7 @@ void imu_system_init(void) {
 // 1. `delay_ms()`：基于Systick实现毫秒延时函数；
 // 2. I2C0、I2C1 GPIO+外设初始化；
 // 3. USART1串口初始化（RS485收发）；
-// 4. 定时器10ms中断，循环调用 `imu_main_loop(rtc_hour)`；
+// 4. 定时器4ms中断，循环调用 `imu_main_loop(rtc_hour)`；
 // 5. RTC时钟读取小时，传入主循环；
 // 6. 上位机下发标定指令时调用 `save_install_zero_point()` 保存安装零点。
 
@@ -850,7 +861,7 @@ void timer_config(void) {
       8400 - 1; // 预分频值 (系统时钟84MHz，分频后为10kHz)
   timer_initpara.alignedmode = TIMER_COUNTER_EDGE;    // 边缘对齐模式
   timer_initpara.counterdirection = TIMER_COUNTER_UP; // 向上计数模式
-  timer_initpara.period = 100 - 1; // 自动重装载值 (100个计数周期 = 10ms)
+  timer_initpara.period = 40 - 1; // 自动重装载值 (40个计数周期 = 4ms = 250Hz)
   timer_initpara.clockdivision = TIMER_CKDIV_DIV1; // 时钟分频
   timer_initpara.repetitioncounter = 0;            // 重复计数器设为0
   timer_init(TIMER1, &timer_initpara);
@@ -974,7 +985,8 @@ static void diag_reg_write(uint8_t dev, uint8_t reg, uint8_t data) {
 
 int main(void) {
 
-  /* App 链接在 0x08002000（bootloader 之后），启动必须把中断向量表重定位到 App 区 */
+  /* App 链接在 0x08002000（bootloader 之后），启动必须把中断向量表重定位到 App
+   * 区 */
   SCB->VTOR = 0x08002000U;
 
   /* bootloader 跳转前调用了 __disable_irq() 关掉全局中断，必须恢复，
@@ -983,9 +995,8 @@ int main(void) {
 
   systick_config();
   com_usart_init();
-  printf("%x",main);
+  printf("%x", main);
   printf("[APP] started\r\n");
-
 
   // soft_i2c_whoami_diag();   /*
   // 开机软I2C读WHO_AM_I诊断：调试用，正式运行注释掉 */ printf("Hellow
@@ -1042,18 +1053,17 @@ int main(void) {
       //   proto_send(0x8E);
       // }
 
-      
-        // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
-        // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
-        //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
-        // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
-        // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
-        //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
-        //        icm_raw.gz);
-        // printf("gx=%.4f,gy=%.4f,gz=%.4f\r\n", icm_raw.gx, icm_raw.gy,
-        //        icm_raw.gz);
-      }
-    
+      // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
+      // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
+      //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
+      // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
+      // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
+      //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
+      //        icm_raw.gz);
+      // printf("gx=%.4f,gy=%.4f,gz=%.4f\r\n", icm_raw.gx, icm_raw.gy,
+      //        icm_raw.gz);
+    }
+
     // 处理串口数据（空闲中断已计算 usart0_rx_len）
     if (usart0_rx_flag) {
       usart0_rx_flag = 0;
@@ -1063,8 +1073,8 @@ int main(void) {
           /* OTA 远程烧录协议 */
           // printf("[DBG] ota_rx: len=%u b=%02X %02X %02X %02X %02X %02X\r\n",
           //        usart0_rx_len, usart0_rx_buffer[0], usart0_rx_buffer[1],
-          //        usart0_rx_buffer[2], usart0_rx_buffer[3], usart0_rx_buffer[4],
-          //        usart0_rx_buffer[5]);
+          //        usart0_rx_buffer[2], usart0_rx_buffer[3],
+          //        usart0_rx_buffer[4], usart0_rx_buffer[5]);
           for (uint16_t i = 0; i < usart0_rx_len; i++) {
             ota_protocol_parse(usart0_rx_buffer[i]);
           }
