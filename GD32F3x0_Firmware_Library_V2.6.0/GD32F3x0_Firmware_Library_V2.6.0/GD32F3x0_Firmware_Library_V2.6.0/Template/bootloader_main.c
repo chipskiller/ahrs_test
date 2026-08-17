@@ -36,7 +36,7 @@
     【烧录方式】
     第一次烧录（必须用编程器）：
       1. 用 JLink/STLink 将 bootloader.bin 烧到 0x08000000
-      2. 用 JLink/STLink 将 app.bin 烧到 0x08001000
+      2. 用 JLink/STLink 将 app.bin 烧到 0x08002000（App 起始地址，见 APP_START_ADDR）
     
     后续升级（通过 OTA）：
       3. 通过串口下发 OTA 升级包，Bootloader 自动完成安装
