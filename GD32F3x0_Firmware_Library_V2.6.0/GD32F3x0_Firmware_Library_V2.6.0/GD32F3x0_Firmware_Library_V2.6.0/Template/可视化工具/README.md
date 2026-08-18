@@ -84,7 +84,7 @@ python visualize_6axis.py --list-cmds data.txt
 
 | 别名 | 功能码 | 说明 |
 |---|---|---|
-| `angle` | 0x82 | 角度发送（Roll, Pitch, Yaw, MagDisturb, Temp） |
+| `angle` | 0x82 | 角度发送（Roll, Pitch, Yaw, MagDisturb[, Temp]） |
 | `zero_set` | 0x83 | 零位设置返回 |
 | `zero` | 0x84 | 零位角度读取 |
 | `alarm` | 0x87 | 偏转报警状态 |
@@ -135,13 +135,15 @@ head(0x55) | len | cmd | param | data... | checksum
 
 | 功能码 | 名称 | 数据字段 | 帧长 |
 |---|---|---|---|
-| 0x82 | 角度发送 | Roll, Pitch, Yaw, MagDisturb, Temp | 15 字节 |
+| 0x82 | 角度发送 | Roll, Pitch, Yaw, MagDisturb[, Temp] | 15 或 13 字节 |
 | 0x83 | 零位设置返回 | ZeroSetStatus | 14 字节 |
 | 0x84 | 零位角度读取 | Roll_base, Pitch_base, Yaw_base | 17 字节 |
 | 0x87 | 偏转报警状态 | FaultType | 14 字节 |
 | 0x8A | 地磁强度读取 | MagNorm, Mx, My, Mz | 17 字节 |
 | 0x8D | 主动上报 ACK | AckStatus | 14 字节 |
 | 0x8E | 心跳帧 | Counter, IMU_Status, MAG_Status | 15 字节 |
+
+> **注**：0x82 的温度字段（Temp）是可选项。`communicate_protocol.h` 中固件若将温度字节注释掉，单帧 0x82 帧长为 13 字节（data=10 字节）；含温度时为 15 字节（data=12 字节）。解析器会按帧长自动识别，含温度则输出 Temp 列，不含则跳过（可视化时 Temp 曲线留空）。
 
 ### 数据编码
 
@@ -249,6 +251,14 @@ head(0x55) | len | cmd | param | data... | checksum
 - 平移开始时临时将 `path.simplify_threshold` 提高到 1.0（最大简化，跳过更多共线顶点），释放后恢复原值
 - 降低 min-max 抽取目标（2000 → 1500 点），进一步减少渲染顶点数
 - 配合预计算缩放因子，每帧渲染开销降至 15-25ms
+
+### 9. 0x82 无温度帧解析失败（温度可选）
+
+**现象**：固件把 0x82 帧里的温度字节注释掉后，导出的 CSV 只有基础列（时间戳、功能码等），没有 Roll/Pitch/Yaw/MagDisturb，波形也无法显示。
+
+**原因**：`parse_cmd_fields` 对 0x82 强制要求 `len(data) >= 12`（含温度的帧 data=12 字节）。固件注释温度后帧变短（data 仅 10 字节），所有 0x82 帧被判定非法并丢弃，导致角度数据全部丢失。
+
+**解决**：将温度改为可选项——`len(data) >= 10` 即解析 Roll、Pitch、Yaw、MagDisturb；仅当 `len(data) >= 12` 时才额外解析 `Temp`（data[10]/data[11]）。同一份日志中两种帧（含/不含温度）可混用，缺失的 Temp 自动以 NaN 留空，不影响其他曲线和导出。
 
 ## 文件说明
 

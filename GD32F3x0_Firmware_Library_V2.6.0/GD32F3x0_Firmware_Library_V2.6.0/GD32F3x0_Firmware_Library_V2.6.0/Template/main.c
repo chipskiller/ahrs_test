@@ -44,7 +44,7 @@ int fputc(int ch, FILE *f) {
 #define I2C_TIMEOUT 10000U // I2C通信超时计数（与hard_i2c.h保持一致）
 
 // 采样与报警配置
-#define DT 0.004f                  // 4ms采样周期 250Hz
+/* 采样周期/频率统一在 main.h 定义（SAMPLING_FREQ_HZ），DT 为其派生值 */
 #define MAG_DISTURB_THRESH 120.0f // 地磁突变判定阈值
 
 // 静止检测阈值（原始值判断，随温度自适应缩放）
@@ -67,7 +67,8 @@ uint8_t mag_disturb_flag = 0;         // 地磁受大车干扰标记
 uint8_t fault_type = 0;               // 偏转报警类型标记
 static uint32_t alarm_filter_cnt = 0; // 报警防抖计数器（帧计数，需32位）
 uint32_t stable_cnt;
-volatile uint8_t imu_loop_flag = 0; // 定时器中断标志
+volatile uint8_t imu_loop_flag = 0;  // 定时器中断标志
+volatile uint8_t imu_debug_flag = 0; // 调试用标志
 
 #define ARRAYNUM(arr_nanme) (uint32_t)(sizeof(arr_nanme) / sizeof(*(arr_nanme)))
 #define TRANSMIT_SIZE (ARRAYNUM(transmitter_buffer) - 1)
@@ -118,8 +119,15 @@ void icm42670_init(void) {
   diag_reg_write(0x68, 0x1F, 0x0F);
   delay_ms(30);
 
-  diag_reg_write(0x68, 0x21, 0x68);
-  diag_reg_write(0x68, 0x20, 0x68);
+  /* 传感器配置（Bank0 直接寄存器，无需 MREG 间接访问）
+     GYRO_CONFIG0  (0x20) = 0x65 : FS=±250dps(11) + ODR=1.6kHz(0101)
+     ACCEL_CONFIG0 (0x21) = 0x65 : FS=±2g(11) + ODR=1.6kHz(0101)
+     GYRO_CONFIG1  (0x23) = 0x34 : LPF=53Hz(100)，保留复位保留位
+     ACCEL_CONFIG1 (0x24) = 0x44 : LPF=53Hz(100)，保留复位AVG */
+  diag_reg_write(0x68, 0x20, 0x65);
+  diag_reg_write(0x68, 0x21, 0x65);
+  diag_reg_write(0x68, 0x23, 0x34);
+  diag_reg_write(0x68, 0x24, 0x44);
 
   /* 恢复硬件I2C引脚(AF4)，供主循环/后续硬件I2C使用 */
   gpio_af_set(GPIOA, GPIO_AF_4, GPIO_PIN_0);
@@ -280,6 +288,16 @@ static void euler_to_quat(float pitch_deg, float roll_deg, float yaw_deg) {
 void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
                          float gz, float temp) {
   // ====== 阶段0：静态变量（跨调用保持状态） ======
+  // 滤波参数由采样周期 SAMPLING_PERIOD_S 派生，首次调用计算一次
+  static uint8_t params_inited = 0;
+  static float alpha_slow = 0.0f, alpha_fast = 0.0f;
+  static float ki_gain = 0.0f;
+  if (!params_inited) {
+    alpha_slow = SAMPLING_PERIOD_S / 10.0f;             /* 慢修 τ=10s */
+    alpha_fast = SAMPLING_PERIOD_S / 0.1f;              /* 快修 τ=0.1s */
+    ki_gain = KI_REF * REF_FREQ_HZ * SAMPLING_PERIOD_S; /* 积分速率守恒 */
+    params_inited = 1;
+  }
   static uint8_t first_run = 1;                // 首次运行标志，触发初始对准
   static float gx_bias = 0.0f, gy_bias = 0.0f; // 陀螺零偏估计值（在线校准）
   static float gx_sum = 0.0f, gy_sum = 0.0f, gz_sum = 0.0f; // 初始对准累加器
@@ -288,18 +306,18 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static int temp_stable_cnt = 0;               // 温度稳定计数器
   static float last_temp = 0;                   // 上次温度值
   static int temp_diff_flag = 0;                // 温度变化标志
-  // ====== 阶段1：初始对准（前1250次采样，约5秒） ======
+  // ====== 阶段1：初始对准（约5秒，帧数由采样频率派生） ======
   if (first_run) {
     gx_sum += gx;
     gy_sum += gy;
     gz_sum += gz;
     init_cnt++;
 
-    if (init_cnt >= 1250) {       // 250Hz下1250帧=5秒初始对准
-      // 1250次采样完成，求均值作为陀螺静态零偏
-      gx_bias = gx_sum / 1250.0f;
-      gy_bias = gy_sum / 1250.0f;
-      gyro_bias.gz_bias = gz_sum / 1250.0f;
+    if (init_cnt >= FRAMES_5S) { // 5秒初始对准（帧数由采样频率派生）
+      // FRAMES_5S 次采样完成，求均值作为陀螺静态零偏
+      gx_bias = gx_sum / (float)FRAMES_5S;
+      gy_bias = gy_sum / (float)FRAMES_5S;
+      gyro_bias.gz_bias = gz_sum / (float)FRAMES_5S;
       gyro_bias.temp_ref = temp;
       last_temp = temp;
       // 用加速度计计算初始姿态角，初始化四元数（yaw=0）
@@ -343,11 +361,10 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     stable_cnt++;
   } else {
     stable_cnt = 0;
-    // 运动时清零 Mahony 积分项，防止积分饱和
-    ix *=
-        0.9980f; // 运动时指数衰减积分项（250Hz折算，保持每秒衰减~0.6）
-    iy *= 0.9980f;
-    iz *= 0.9980f;
+    // 运动时衰减 Mahony 积分项，防止积分饱和（INTEGRAL_DECAY 预计算常量）
+    ix *= INTEGRAL_DECAY;
+    iy *= INTEGRAL_DECAY;
+    iz *= INTEGRAL_DECAY;
   }
 
   // ====== 阶段4：陀螺积分 → 四元数增量（一阶龙格库塔法） ======
@@ -396,8 +413,9 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   // ====== 阶段5：加速度计 Mahony 互补滤波修正（仅修正 pitch/roll） ======
   float acc_norm = sqrtf(ax * ax + ay * ay + az * az);
-  // 条件：连续静止 > 100ms（250Hz下25帧）且加速度模长接近 1g（排除剧烈运动干扰）
-  if (stable_cnt > 25 && acc_norm > 0.9f && acc_norm < 1.1f) {
+  // 条件：连续静止 > 100ms（帧数由采样频率派生）且加速度模长接近
+  // 1g（排除剧烈运动干扰）
+  if (stable_cnt > FRAMES_100MS && acc_norm > 0.9f && acc_norm < 1.1f) {
     float ax_n = ax / acc_norm; // 归一化加速度
     float ay_n = ay / acc_norm;
     float az_n = az / acc_norm;
@@ -413,11 +431,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     float ez = ax_n * vy - ay_n * vx;
 
     // PI 控制器：比例项快速收敛 + 积分项消除稳态误差
-    const float Kp = 5.0f;    // 比例增益（τ=1/Kp≈0.2s，与采样率无关）
-    const float Ki = 0.0012f; // 积分增益（按250Hz折算：0.003×100/250）
-    ix += ex * Ki;
-    iy += ey * Ki;
-    iz += ez * Ki;
+    const float Kp = 5.0f; // 比例增益（τ=1/Kp≈0.2s，与采样率无关）
+    // 积分增益 ki_gain 由采样周期派生（见函数头部），保持每秒积分速率不变
+    ix += ex * ki_gain;
+    iy += ey * ki_gain;
+    iz += ez * ki_gain;
 
     // 积分限幅：防止积分项饱和后把姿态推跑（自激翻滚的诱因之一）
     const float I_LIMIT = 0.5f;
@@ -467,7 +485,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
   temp_stable_cnt++;
-  if (temp_stable_cnt % 7500 == 0) { // 250Hz下7500帧=30s，检测温度变化
+  if (temp_stable_cnt % (int)FRAMES_30S == 0) { // 每30s（帧数派生）检测温度变化
     if (fabsf(temp - last_temp) >= 0.3f) {
       last_temp = temp;
       temp_stable_cnt = 0;
@@ -476,8 +494,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
       temp_diff_flag = 0;
     }
   }
-  if (stable_cnt > 1250) {
-    float alpha = temp_diff_flag ? 0.1f : 0.001f; // 快修正 / 慢修正
+
+  // 零偏更新：仅当长时间静止（5秒，帧数派生）才执行
+  if (stable_cnt > FRAMES_5S) {
+    // 快/慢修正系数由采样周期派生（τ 分别 0.1s / 10s）
+    float alpha = temp_diff_flag ? alpha_fast : alpha_slow;
     gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
     gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
     gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
@@ -572,10 +593,10 @@ void update_day_night_mode(uint8_t rtc_hour) {
     day_mode = 0;
 }
 
-/************************ 主循环调度函数（4ms定时调用）
+/************************ 主循环调度函数（1ms定时调用）
  * ************************/
 /**
- * @brief 定时4ms执行一次（250Hz），传入RTC当前小时
+ * @brief 定时1ms执行一次（1000Hz），传入RTC当前小时
  */
 void imu_main_loop(uint8_t rtc_hour) {
   // 更新昼夜工作模式
@@ -588,7 +609,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   qmc5883p_get_raw_data();
   static int16_t loop_cnt = 0;
   loop_cnt++;
-  if (loop_cnt % 25 == 0) {  // 250Hz下每25帧=100ms检测一次地磁
+  if (loop_cnt % (int)FRAMES_100MS == 0) { // 每100ms检测一次地磁（帧数派生）
     // 检测前后地磁向量模长，参数值判断磁场是否被干扰
     mag_disturb_detect();
   } else {
@@ -624,7 +645,8 @@ void imu_main_loop(uint8_t rtc_hour) {
   }
 
   // 防抖滤波（预警时间可运行时修改）
-  uint32_t alarm_time_max = alarm_warning_time * 250; // 250Hz下每秒250帧
+  uint32_t alarm_time_max =
+      alarm_warning_time * FRAMES_PER_SEC; // 秒→帧（派生）
   if (alarm_level != 0x00) {
     alarm_filter_cnt++;
     if (alarm_filter_cnt > alarm_time_max) {
@@ -657,7 +679,7 @@ void imu_system_init(void) {
 // 1. `delay_ms()`：基于Systick实现毫秒延时函数；
 // 2. I2C0、I2C1 GPIO+外设初始化；
 // 3. USART1串口初始化（RS485收发）；
-// 4. 定时器4ms中断，循环调用 `imu_main_loop(rtc_hour)`；
+// 4. 定时器1ms中断，循环调用 `imu_main_loop(rtc_hour)`；
 // 5. RTC时钟读取小时，传入主循环；
 // 6. 上位机下发标定指令时调用 `save_install_zero_point()` 保存安装零点。
 
@@ -857,11 +879,14 @@ void timer_config(void) {
 
   /* 3. 配置 TIMER1 时基单元 */
   timer_struct_para_init(&timer_initpara);
+  /* 定时器时钟 = 84MHz / 8400 = 10kHz；
+     重装载值由采样频率派生（须能整除，否则需同步调整预分频） */
   timer_initpara.prescaler =
       8400 - 1; // 预分频值 (系统时钟84MHz，分频后为10kHz)
   timer_initpara.alignedmode = TIMER_COUNTER_EDGE;    // 边缘对齐模式
   timer_initpara.counterdirection = TIMER_COUNTER_UP; // 向上计数模式
-  timer_initpara.period = 40 - 1; // 自动重装载值 (40个计数周期 = 4ms = 250Hz)
+  timer_initpara.period = (uint32_t)(10000.0f / SAMPLING_FREQ_HZ) -
+                          1; // 自动重装载值（由采样频率派生）
   timer_initpara.clockdivision = TIMER_CKDIV_DIV1; // 时钟分频
   timer_initpara.repetitioncounter = 0;            // 重复计数器设为0
   timer_init(TIMER1, &timer_initpara);
@@ -1037,9 +1062,15 @@ int main(void) {
   timer_config();
   // printf("timer init done!\n");
 
-  static uint32_t debug_cnt = 0;
+  static uint32_t rate_cnt = 0;
   while (1) {
+    if (imu_debug_flag) {
+      imu_debug_flag = 0;
+      // printf("rate_cnt=%d\n", rate_cnt);
+      rate_cnt = 0;
+    }
     if (imu_loop_flag) {
+      rate_cnt++;
       imu_main_loop(12);
       imu_loop_flag = 0;
 

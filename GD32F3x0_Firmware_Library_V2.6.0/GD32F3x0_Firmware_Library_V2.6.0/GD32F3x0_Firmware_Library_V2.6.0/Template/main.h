@@ -46,6 +46,25 @@ OF SUCH DAMAGE.
 #include <stdint.h>
 #include "flash.h"
 
+/* ========== 采样周期统一配置（改频率只需改 SAMPLING_FREQ_HZ 一处） ========== */
+#define SAMPLING_FREQ_HZ  1000.0f         /* 采样频率(Hz)：唯一需要修改的频率参数 */
+#define SAMPLING_PERIOD_S (1.0f / SAMPLING_FREQ_HZ) /* 采样周期(秒) */
+#define DT                SAMPLING_PERIOD_S         /* 兼容：DT = 采样周期 */
+
+/* 时间 → 帧数（由采样频率自动派生，改频率无需手动调整） */
+#define FRAMES_PER_SEC  ((uint32_t)SAMPLING_FREQ_HZ)           /* 每秒帧数 */
+#define FRAMES_100MS    ((uint32_t)(0.1f * SAMPLING_FREQ_HZ))  /* 100ms 帧数 */
+#define FRAMES_5S       ((uint32_t)(5.0f * SAMPLING_FREQ_HZ))  /* 5s 帧数 */
+#define FRAMES_30S      ((uint32_t)(30.0f * SAMPLING_FREQ_HZ)) /* 30s 帧数 */
+
+/* 滤波参数标定的参考基准（历史值在 100Hz 下标定，由采样频率折算） */
+#define REF_FREQ_HZ 100.0f  /* 参考频率(Hz) */
+#define KI_REF      0.003f  /* 参考频率下的 Mahony 积分增益 Ki */
+/* 积分衰减系数：预计算常量，避免运行期 powf 引入庞大数学库导致 Flash 溢出。
+   公式 decay = 0.995^(REF_FREQ_HZ/SAMPLING_FREQ_HZ) = 0.995^(100/1000) ≈ 0.9995
+   改频率时按此公式重新计算本值 */
+#define INTEGRAL_DECAY 0.9995f
+
 /* USART0 DMA 接收缓冲区大小（main.c 与 gd32f3x0_it.c 共用，勿在两个文件重复定义）
    必须 ≥ 最大一帧：OTA 0xF1 数据帧 = 518 字节 */
 #define USART0_RX_BUF_SIZE 1024U

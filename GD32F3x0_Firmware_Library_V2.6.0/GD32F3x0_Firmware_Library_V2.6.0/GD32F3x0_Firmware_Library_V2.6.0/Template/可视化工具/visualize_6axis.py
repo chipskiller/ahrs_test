@@ -9,7 +9,8 @@
     - checksum = ~(buf[1] ^ buf[2] ^ ... ^ buf[len]) & 0xFF
 
 支持功能码：
-    0x82 : 角度发送        -> Roll, Pitch, Yaw, MagDisturb, Temp
+    0x82 : 角度发送        -> Roll, Pitch, Yaw, MagDisturb[, Temp]
+                             （Temp 可选：固件含温度时解析，不含时跳过）
     0x83 : 零位设置返回    -> ZeroSetStatus
     0x84 : 零位角度读取    -> Roll_base, Pitch_base, Yaw_base
     0x87 : 偏转报警状态    -> FaultType
@@ -159,15 +160,19 @@ def parse_cmd_fields(cmd: int, data: bytes) -> dict[str, Any]:
     """根据功能码解析数据字段。"""
     try:
         if cmd == 0x82:  # 角度发送
-            if len(data) < 12:
+            if len(data) < 10:
                 return {}
-            return {
+            fields = {
                 "Roll": parse_signed_3byte(data[0], data[1], data[2]),
                 "Pitch": parse_signed_3byte(data[3], data[4], data[5]),
                 "Yaw": parse_signed_3byte(data[6], data[7], data[8]),
                 "MagDisturb": data[9],
-                "Temp": parse_unsigned_2byte(data[10], data[11]) / 100.0,
             }
+            # 温度是可选项：communicate_protocol.h 中 temp 字节可被注释。
+            # 含温度时 data 长度 >=12（data[10]/data[11] 为温度），不含时长度仅为 10。
+            if len(data) >= 12:
+                fields["Temp"] = parse_unsigned_2byte(data[10], data[11]) / 100.0
+            return fields
         elif cmd == 0x83:  # 零位设置返回
             return {"ZeroSetStatus": data[0] if data else None}
         elif cmd == 0x84:  # 零位角度读取返回

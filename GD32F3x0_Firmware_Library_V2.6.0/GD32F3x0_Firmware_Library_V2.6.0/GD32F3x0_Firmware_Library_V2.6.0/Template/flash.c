@@ -86,21 +86,21 @@ extern void delay_1ms(uint32_t ms);
 int save_install_zero_point(void) {
   float yaw_sum = 0.0f, pit_sum = 0.0f, rol_sum = 0.0f;
 
-  /* 采样间隔须与姿态解算 DT(0.004s=250Hz) 一致，否则积分倍数错误。
-     250Hz 下 1250 帧 × 4ms = 5 秒，与主循环节奏相同 */
-  for (uint16_t i = 0; i < 1250; i++) {
+  /* 采样间隔与帧数均由 main.h 的采样周期派生，保证与姿态解算 DT 一致，
+     避免积分倍数错误（5 秒标定 = FRAMES_5S 帧 × 采样周期） */
+  for (uint16_t i = 0; i < FRAMES_5S; i++) {
     icm42670_get_raw_data();
     attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
                         icm_raw.gy, icm_raw.gx, icm_raw.temp);
     yaw_sum += att.yaw_now;
     pit_sum += att.pitch;
     rol_sum += att.roll;
-    delay_1ms(4);
+    delay_1ms((uint32_t)(SAMPLING_PERIOD_S * 1000.0f));
   }
 
-  att.yaw_base = yaw_sum / 1250.0f;
-  att.pitch_base = pit_sum / 1250.0f;
-  att.roll_base = rol_sum / 1250.0f;
+  att.yaw_base = yaw_sum / (float)FRAMES_5S;
+  att.pitch_base = pit_sum / (float)FRAMES_5S;
+  att.roll_base = rol_sum / (float)FRAMES_5S;
   gyro_bias.temp_ref = icm_raw.temp;
 
   /* 零点数据写入第 63 页（A/B 双备份 + 陀螺零偏，用页内"读-改-擦-写"保护，

@@ -207,6 +207,7 @@ void USART0_IRQHandler(void)
 }
 
 extern volatile uint8_t imu_loop_flag;
+extern volatile uint8_t imu_debug_flag;
 
 void TIMER1_IRQHandler(void)
 {
@@ -214,6 +215,12 @@ void TIMER1_IRQHandler(void)
     {
         timer_interrupt_flag_clear(TIMER1, TIMER_INT_FLAG_UP);
         imu_loop_flag = 1;
+        static uint32_t debug_cnt = 0;
+        debug_cnt++;
+        if (debug_cnt >= SAMPLING_FREQ_HZ) {   /* 每1000次中断(~1s@1000Hz)置一次调试标志 */
+          imu_debug_flag = 1;
+          debug_cnt = 0;          /* 必须清零，否则之后每次中断都置位 → 主循环刷屏乱码 */
+        }
         // printf("1\n");
     }
 }
