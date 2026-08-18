@@ -514,7 +514,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
   } else {
     // 温度突变时减慢航向积分，避免温漂突变导致航向跳动
-    float alpha_temp = temp_diff_flag && is_stable ? 0.2 : 1;
+    float alpha_temp = temp_diff_flag && is_stable ? 0.1 : 1;
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
     att.yaw_now += gz_comp * DT * alpha_temp;
   }
