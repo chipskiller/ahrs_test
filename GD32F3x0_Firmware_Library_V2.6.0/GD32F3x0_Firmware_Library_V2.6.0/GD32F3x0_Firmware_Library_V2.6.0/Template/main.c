@@ -293,8 +293,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static float alpha_slow = 0.0f, alpha_fast = 0.0f;
   static float ki_gain = 0.0f;
   if (!params_inited) {
-    alpha_slow = SAMPLING_PERIOD_S / 10.0f;             /* 慢修 τ=10s */
-    alpha_fast = SAMPLING_PERIOD_S / 0.1f;              /* 快修 τ=0.1s */
+    alpha_slow = SAMPLING_PERIOD_S / 3.0f;              /* 慢修 τ=3s（原10s，加速收敛） */
+    alpha_fast = SAMPLING_PERIOD_S / 0.1f;              /* 快修 τ=0.1s（温度突变） */
     ki_gain = KI_REF * REF_FREQ_HZ * SAMPLING_PERIOD_S; /* 积分速率守恒 */
     params_inited = 1;
   }
@@ -352,9 +352,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   }
 
   static uint16_t stable_cnt = 0;                    // 连续静止采样计数
+  float acc_norm_stable = sqrtf(ax * ax + ay * ay + az * az); // 加速度模长辅助判静止
   uint8_t is_stable = (fabsf(gx) < stable_thresh) && // 三轴原始角速度均低于
-                      (fabsf(gy) < stable_thresh) && // 温度自适应阈值才判静止
-                      (fabsf(gz) < stable_thresh);
+                      (fabsf(gy) < stable_thresh) && // 温度自适应阈值
+                      (fabsf(gz) < stable_thresh) &&
+                      (acc_norm_stable > 0.95f && acc_norm_stable < 1.05f); // 且加速度≈1g
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
@@ -495,10 +497,18 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     }
   }
 
-  // 零偏更新：仅当长时间静止（5秒，帧数派生）才执行
+  // 零偏更新：仅当静止≥5秒（帧数派生）才执行
   if (stable_cnt > FRAMES_5S) {
-    // 快/慢修正系数由采样周期派生（τ 分别 0.1s / 10s）
-    float alpha = temp_diff_flag ? alpha_fast : alpha_slow;
+    // 温度突变→最快收敛(τ=0.1s)；刚静止的前5秒→快速重收敛(τ=1s)
+    // 抵消晃动后残差；之后→慢速跟踪(τ=3s)
+    float alpha;
+    if (temp_diff_flag) {
+      alpha = alpha_fast;                    /* τ=0.1s */
+    } else if (stable_cnt < FRAMES_5S * 2) {
+      alpha = SAMPLING_PERIOD_S / 1.0f;      /* τ=1s 快速重收敛 */
+    } else {
+      alpha = alpha_slow;                    /* τ=3s */
+    }
     gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
     gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
     gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
