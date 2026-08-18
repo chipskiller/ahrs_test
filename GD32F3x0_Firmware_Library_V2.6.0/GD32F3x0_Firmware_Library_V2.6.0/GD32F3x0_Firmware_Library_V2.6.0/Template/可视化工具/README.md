@@ -91,6 +91,7 @@ python visualize_6axis.py --list-cmds data.txt
 | `mag` | 0x8A | 地磁强度读取（MagNorm, Mx, My, Mz） |
 | `ack` | 0x8D | 主动上报 ACK |
 | `heartbeat` | 0x8E | 心跳帧（Counter, IMU_Status, MAG_Status） |
+| `temp` / `temp_gyro` | 0xEE | 温度-陀螺调试（T, gz_raw，温度特性分析） |
 
 ## 交互操作
 
@@ -142,6 +143,7 @@ head(0x55) | len | cmd | param | data... | checksum
 | 0x8A | 地磁强度读取 | MagNorm, Mx, My, Mz | 17 字节 |
 | 0x8D | 主动上报 ACK | AckStatus | 14 字节 |
 | 0x8E | 心跳帧 | Counter, IMU_Status, MAG_Status | 15 字节 |
+| 0xEE | 温度-陀螺调试 | T, gz_raw（文本行，见下节） | 文本行 |
 
 > **注**：0x82 的温度字段（Temp）是可选项。`communicate_protocol.h` 中固件若将温度字节注释掉，单帧 0x82 帧长为 13 字节（data=10 字节）；含温度时为 15 字节（data=12 字节）。解析器会按帧长自动识别，含温度则输出 Temp 列，不含则跳过（可视化时 Temp 曲线留空）。
 
@@ -174,6 +176,39 @@ head(0x55) | len | cmd | param | data... | checksum
 | 参数 | 如 0x00 |
 | 校验通过 | True/False |
 | *(各数据字段)* | 如 Roll, Pitch, Yaw 等 |
+
+## 温度-陀螺原始值分析（0xEE）
+
+固件 `main.c` 中的调试输出行（伪功能码 0xEE）：
+
+```c
+printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", icm_raw.temp, icm_raw.gz);
+```
+
+日志中对应文本行（自动识别，无需十六进制帧）：
+
+```
+[10:00:00.000]收←◆55 00 EE T=25.123  gz_raw=-1.234
+```
+
+### 用法
+
+```powershell
+# 只分析温度-陀螺数据
+python visualize_6axis.py data.txt --cmd 0xEE
+python visualize_6axis.py data.txt --cmd temp
+```
+
+### 处理流程
+
+1. **分箱**：以 0.1°C 为最小分度。对每个分度中心 c（0.1 的倍数），取 `c-0.05 <= T < c+0.05` 范围内的陀螺原始值求平均，放到 c 上。
+2. **拟合**：纵坐标温度、横坐标陀螺原始值，拟合 `T = k*gz_raw + b`。
+   - 主方法：**加权最小二乘（WLS）**，权重 = 分箱样本数（样本多的箱均值更可靠，统计上优于普通最小二乘）
+   - 对照：普通最小二乘（OLS）
+3. **输出**：
+   - 控制台打印斜率 `k`（°C/LSB）及其倒数（LSB/°C）、R²
+   - 图：原始散点（淡）+ 分箱均值（大小∝样本数）+ WLS/OLS 拟合线 + 参数信息框，保存为 `*_0xEE_温度_陀螺拟合.png`
+   - 分箱数据 CSV：`*_0xEE_分箱数据.csv`（温度分度、样本数、均值、标准差、拟合参数）
 
 ## 遇到的问题与解决方案
 

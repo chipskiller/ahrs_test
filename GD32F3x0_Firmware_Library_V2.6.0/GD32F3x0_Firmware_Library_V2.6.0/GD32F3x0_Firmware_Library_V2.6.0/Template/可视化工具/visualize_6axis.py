@@ -17,6 +17,7 @@
     0x8A : 地磁强度读取    -> MagNorm, Mx, My, Mz
     0x8D : 主动上报 ACK    -> AckStatus
     0x8E : 心跳帧          -> Counter, IMU_Status, MAG_Status
+    0xEE : 温度-陀螺调试    -> T, gz_raw（main.c 文本调试行，温度特性分析）
 
 交互说明（Windows 11 稳定版）：
     - 点击图例条目   → 切换对应通道的显示/隐藏（隐藏后半透明）
@@ -128,7 +129,7 @@ def parse_unsigned_2byte(high_byte: int, low_byte: int) -> int:
 
 def parse_frame(byte_values: list[int], start: int) -> tuple[Frame | None, int]:
     """从 byte_values 的 start 位置解析一帧，返回 (Frame, next_index)。"""
-    if start + 2 >= len(byte_values):
+    if start + 3 >= len(byte_values):
         return None, start + 1
     if byte_values[start] != 0x55:
         return None, start + 1
@@ -219,6 +220,11 @@ def parse_file(file_path: str | Path) -> list[Frame]:
     line_pattern = re.compile(
         r"\[(\d{2}:\d{2}:\d{2}\.\d{3})\]收←◆((?:[0-9A-Fa-f]{2}\s*)+)"
     )
+    # 0xEE 温度-陀螺调试文本行（main.c: printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", ...)）
+    ee_pattern = re.compile(
+        r"\[(\d{2}:\d{2}:\d{2}\.\d{3})\][^\n]*?55\s+00\s+EE\s+"
+        r"T=\s*(-?\d+(?:\.\d+)?)\s+gz_raw=\s*(-?\d+(?:\.\d+)?)"
+    )
 
     records: list[Frame] = []
     day_offset = 0.0
@@ -227,11 +233,12 @@ def parse_file(file_path: str | Path) -> list[Frame]:
 
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
-            match = line_pattern.search(line)
-            if not match:
+            m_ee = ee_pattern.search(line)
+            match = None if m_ee else line_pattern.search(line)
+            if not m_ee and not match:
                 continue
 
-            time_str, hex_str = match.groups()
+            time_str = m_ee.group(1) if m_ee else match.group(1)
             current_seconds = time_str_to_seconds(time_str)
 
             if prev_seconds is not None and current_seconds < prev_seconds - 12 * 3600:
@@ -242,6 +249,20 @@ def parse_file(file_path: str | Path) -> list[Frame]:
                 base_seconds = corrected_seconds
             prev_seconds = current_seconds
 
+            if m_ee:
+                records.append(Frame(
+                    timestamp=time_str,
+                    rel_time=corrected_seconds - base_seconds,
+                    cmd=0xEE,
+                    param=0,
+                    data=b"",
+                    checksum_ok=True,
+                    fields={"T": float(m_ee.group(2)),
+                            "gz_raw": float(m_ee.group(3))},
+                ))
+                continue
+
+            hex_str = match.group(2)
             byte_values = [int(b, 16) for b in hex_str.split()]
             i = 0
             while i < len(byte_values):
@@ -270,6 +291,7 @@ CMD_NAMES = {
     0x8A: "地磁强度读取 (0x8A)",
     0x8D: "主动上报 ACK (0x8D)",
     0x8E: "心跳帧 (0x8E)",
+    0xEE: "温度-陀螺调试 (0xEE)",
 }
 
 # 使用 Set1 + Set2 组合色板，确保相邻通道颜色明显不同
@@ -829,6 +851,9 @@ def _show_figures_qt():
 
 def plot_cmd(records: list[Frame], cmd: int, file_name: str = "", show: bool = True) -> plt.Figure | None:
     """为指定功能码绘制一个 VOFA 风格的波形图。"""
+    if cmd == 0xEE:
+        # 0xEE 走温度-陀螺特性分析（分箱+拟合），不用通用时序波形
+        return analyze_temp_gyro(records, file_name, show=show)
     result = build_figure(records, cmd, file_name)
     if result is None:
         return None
@@ -858,6 +883,133 @@ def plot_all(records: list[Frame], file_name: str = "") -> None:
     for cmd in cmds:
         plot_cmd(records, cmd, file_name, show=True)
     _show_figures_qt()
+
+
+# ---------------------------------------------------------------------------
+# 0xEE 温度-陀螺原始值特性分析
+# ---------------------------------------------------------------------------
+
+def _wls_fit(x: np.ndarray, y: np.ndarray, w: np.ndarray):
+    """加权最小二乘拟合 y = k*x + b，返回 (k, b, r2)。"""
+    W = w.sum()
+    xw = (w * x).sum() / W
+    yw = (w * y).sum() / W
+    sxx = (w * (x - xw) ** 2).sum()
+    sxy = (w * (x - xw) * (y - yw)).sum()
+    k = sxy / sxx
+    b = yw - k * xw
+    ss_res = (w * (y - (k * x + b)) ** 2).sum()
+    ss_tot = (w * (y - yw) ** 2).sum()
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return k, b, r2
+
+
+def analyze_temp_gyro(records: list[Frame], file_name: str = "",
+                      output_dir: str | Path | None = None,
+                      show: bool = True) -> plt.Figure | None:
+    """0xEE 温度-陀螺原始值分析（纵坐标温度，横坐标陀螺原始值）。
+
+    - 分箱：以 0.1°C 为最小分度，对每个分度中心 c（0.1 的倍数），
+      取 c-0.05 <= T < c+0.05 范围内陀螺原始值的平均放到 c 上
+    - 拟合：加权最小二乘（WLS，权重=分箱样本数，比 OLS 更优）拟合 T = k*gz_raw + b，
+      同时给出普通最小二乘（OLS）作对照
+    - 输出：散点+分箱均值+拟合线图（保存 PNG）、分箱 CSV、控制台斜率
+    """
+    ee = [r for r in records
+          if r.cmd == 0xEE and "T" in r.fields and "gz_raw" in r.fields]
+    if not ee:
+        print("未找到 0xEE 温度-陀螺调试数据")
+        return None
+
+    temps = np.array([r.fields["T"] for r in ee], dtype=float)
+    raws = np.array([r.fields["gz_raw"] for r in ee], dtype=float)
+
+    # ---- 0.1°C 分箱：floor((T+0.05)/0.1)*0.1 即区间 [c-0.05, c+0.05) 的中心 c ----
+    bin_idx = np.floor((temps + 0.05) / 0.1).astype(np.int64)
+    uniq, inv, counts = np.unique(bin_idx, return_inverse=True, return_counts=True)
+    centers = np.round(uniq * 0.1, 4)
+    sum_raw = np.zeros(len(uniq), dtype=float)
+    sum_sq = np.zeros(len(uniq), dtype=float)
+    np.add.at(sum_raw, inv, raws)
+    np.add.at(sum_sq, inv, raws * raws)
+    mean_raw = sum_raw / counts
+    std_raw = np.sqrt(np.clip(sum_sq / counts - mean_raw ** 2, 0, None))
+
+    # ---- 拟合：WLS（权重=样本数）为主，OLS 对照 ----
+    k_w, b_w, r2_w = _wls_fit(mean_raw, centers, counts.astype(float))
+    k_o, b_o, r2_o = _wls_fit(mean_raw, centers, np.ones(len(uniq)))
+
+    inv_slope = (1.0 / k_w) if k_w != 0 else float("inf")
+    print(f"\n[0xEE 温度-陀螺分析] 样本 {len(ee)} 个，分箱 {len(uniq)} 个")
+    print(f"  WLS 拟合: T = {k_w:.6g} * gz_raw + {b_w:.4f}   (R²={r2_w:.4f})")
+    print(f"    温度-原始值变化斜率 k = {k_w:.6g} °C/LSB，"
+          f"即 {inv_slope:.6g} LSB/°C")
+    print(f"  OLS 对照: k = {k_o:.6g} °C/LSB (R²={r2_o:.4f})")
+
+    # ---- 绘图 ----
+    fig = Figure(figsize=(12, 7))
+    ax = fig.add_subplot(111)
+    ax.scatter(raws, temps, s=4, alpha=0.15, color="tab:blue",
+               label=f"原始样本 ({len(ee)})")
+    ax.scatter(mean_raw, centers, s=np.sqrt(counts) * 8, alpha=0.9,
+               color="tab:orange", edgecolors="black", linewidths=0.6,
+               label=f"0.1°C 分箱平均 ({len(uniq)} 箱, 大小∝样本数)")
+    xs = np.linspace(mean_raw.min(), mean_raw.max(), 100)
+    ax.plot(xs, k_w * xs + b_w, "r-", lw=2,
+            label=f"WLS 拟合 k={k_w:.5g}°C/LSB")
+    ax.plot(xs, k_o * xs + b_o, "g--", lw=1.2, alpha=0.8,
+            label=f"OLS 对照 k={k_o:.5g}°C/LSB")
+    info = (f"WLS: T = {k_w:.6g}·raw + {b_w:.4f}\n"
+            f"斜率 = {k_w:.6g} °C/LSB\n"
+            f"     = {inv_slope:.6g} LSB/°C\n"
+            f"R²(WLS) = {r2_w:.4f},  R²(OLS) = {r2_o:.4f}\n"
+            f"样本 {len(ee)} / 分箱 {len(uniq)}")
+    ax.text(0.02, 0.98, info, transform=ax.transAxes, va="top", ha="left",
+            fontsize=9,
+            fontfamily=['Microsoft YaHei', 'Consolas', 'Courier New', 'monospace'],
+            bbox=dict(boxstyle="round,pad=0.4", fc="lightyellow",
+                      alpha=0.95, ec="gray"))
+    ax.set_xlabel("陀螺仪原始值 gz_raw (LSB)", fontsize=11)
+    ax.set_ylabel("温度 T (°C)", fontsize=11)
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.legend(loc="lower right", fontsize=9, framealpha=0.9)
+    ax.set_title(f"{file_name}  |  温度 - 陀螺原始值特性（0.1°C 分箱 + 最小二乘拟合）",
+                 fontsize=10, pad=10)
+
+    # ---- 保存 PNG + 分箱 CSV ----
+    out = Path(output_dir) if output_dir else Path.cwd()
+    out.mkdir(parents=True, exist_ok=True)
+    safe_name = file_name.replace(".", "_").replace(" ", "_")
+    png_path = out / f"{safe_name}_0xEE_温度_陀螺拟合.png"
+    try:
+        fig.savefig(png_path, dpi=300, bbox_inches="tight")
+        print(f"  已保存: {png_path}")
+    except Exception as e:
+        print(f"  保存 PNG 失败: {e}")
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame({
+            "温度分度(°C)": centers,
+            "样本数": counts,
+            "陀螺原始值平均": np.round(mean_raw, 4),
+            "陀螺原始值标准差": np.round(std_raw, 4),
+            "WLS斜率(°C/LSB)": k_w,
+            "WLS截距(°C)": b_w,
+        })
+        csv_path = out / f"{safe_name}_0xEE_分箱数据.csv"
+        df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+        print(f"  已保存: {csv_path}")
+    except Exception as e:
+        print(f"  保存分箱 CSV 失败: {e}")
+
+    # ---- 交互窗口 ----
+    if show:
+        FigureCanvasQTAgg(fig)  # 绑定 fig.canvas，PureQtWindow 复用
+        pw = PureQtWindow(fig, title=f"{file_name} | 温度-陀螺原始值拟合")
+        _qt_windows.append(pw)
+
+    return fig
 
 
 # ---------------------------------------------------------------------------
@@ -978,6 +1130,8 @@ def main() -> None:
             "mag": 0x8A,
             "ack": 0x8D,
             "heartbeat": 0x8E,
+            "temp": 0xEE,
+            "temp_gyro": 0xEE,
         }
         if cmd_lower in alias_map:
             target_cmd = alias_map[cmd_lower]
