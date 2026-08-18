@@ -488,7 +488,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
   temp_stable_cnt++;
   if (temp_stable_cnt % (int)FRAMES_30S == 0) { // 每30s（帧数派生）检测温度变化
-    if (fabsf(temp - last_temp) >= 0.3f) {
+    if (fabsf(temp - last_temp) >= 0.2f) {
       last_temp = temp;
       temp_stable_cnt = 0;
       temp_diff_flag = 1;
@@ -513,8 +513,10 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
     gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
   } else {
+    // 温度突变时减慢航向积分，避免温漂突变导致航向跳动
+    float alpha_temp = temp_diff_flag && is_stable ? 0.2 : 1;
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
-    att.yaw_now += gz_comp * DT;
+    att.yaw_now += gz_comp * DT * alpha_temp;
   }
   // att.yaw_now += gz_comp * DT;
   // printf("is_stable=%d, yaw=%.5f, gz_bias=%.5f\r\n", is_stable, att.yaw_now,
@@ -523,7 +525,6 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   while (att.yaw_now > 180.0f) {
     att.yaw_now -= 360.0f;
   }
-
   while (att.yaw_now < -180.0f) {
     att.yaw_now += 360.0f;
   }
@@ -1074,8 +1075,10 @@ int main(void) {
 
   static uint32_t rate_cnt = 0;
   while (1) {
+    
     if (imu_debug_flag) {
       imu_debug_flag = 0;
+      // printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", icm_raw.temp, icm_raw.gx);
       // printf("rate_cnt=%d\n", rate_cnt);
       rate_cnt = 0;
     }
