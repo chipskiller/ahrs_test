@@ -296,7 +296,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   if (!params_inited) {
     alpha_slow = SAMPLING_PERIOD_S / 3.0f; /* 慢修 τ=3s（原10s，加速收敛） */
     alpha_fast = SAMPLING_PERIOD_S / 0.1f; /* 快修 τ=0.1s（温度突变） */
-    alpha_very_slow = SAMPLING_PERIOD_S / 30.0f; /* 极慢修 τ=30s（温度稳定） */
+    alpha_very_slow = SAMPLING_PERIOD_S / 10.0f; /* 极慢修 τ=10s（温度稳定） */
     ki_gain = KI_REF * REF_FREQ_HZ * SAMPLING_PERIOD_S; /* 积分速率守恒 */
     params_inited = 1;
   }
@@ -530,18 +530,18 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   } else {
     stable_cnt_2 = 0;
     if (!temp_diff_flag && is_stable) {
-      alpha = alpha_very_slow; /* τ=30s */
+      alpha = alpha_very_slow; /* τ=10s */
       gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
       gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
       gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
     } else if (is_stable) {
-      alpha = alpha_very_slow * 1.5; /* τ=30s */
+      alpha = alpha_very_slow * 2; /* τ=5s */
       gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
       gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
       gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
     }
     // 温度突变时减慢航向积分，避免温漂突变导致航向跳动
-    float alpha_temp = temp_diff_flag && is_stable ? 0.005 : 1;
+    float alpha_temp = temp_diff_flag ? 0.005 : 1;
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
     att.yaw_now += gz_comp * DT * alpha_temp;
   }
