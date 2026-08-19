@@ -47,8 +47,9 @@ int fputc(int ch, FILE *f) {
 /* 采样周期/频率统一在 main.h 定义（SAMPLING_FREQ_HZ），DT 为其派生值 */
 #define MAG_DISTURB_THRESH 120.0f // 地磁突变判定阈值
 
-// 静止检测阈值（原始值判断，随温度自适应缩放）
-#define STABLE_THRESH_BASE 1.3f        // 基础阈值(°/s)：覆盖25°C初始零偏±1°/s
+// 静止检测阈值（修正值判断：残差阈值，随温度自适应缩放）
+#define STABLE_THRESH_BASE                                                     \
+  0.7f // 基础阈值(°/s)：覆盖零偏残差（用修正值判静止，可更灵敏）
 #define STABLE_THRESH_TEMP_COEFF 0.02f // 温度系数(°/s/°C)：手册0.015，留余量
 #define STABLE_THRESH_MAX 5.0f         // 阈值上限(°/s)，防极端温度下阈值过大
 #define ZRO_TEMP_REF 25.0f // 手册零偏参考温度(°C)：温漂系数以25°C为基准
@@ -290,11 +291,12 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   // ====== 阶段0：静态变量（跨调用保持状态） ======
   // 滤波参数由采样周期 SAMPLING_PERIOD_S 派生，首次调用计算一次
   static uint8_t params_inited = 0;
-  static float alpha_slow = 0.0f, alpha_fast = 0.0f;
+  static float alpha_slow = 0.0f, alpha_fast = 0.0f, alpha_very_slow = 0.0f;
   static float ki_gain = 0.0f;
   if (!params_inited) {
-    alpha_slow = SAMPLING_PERIOD_S / 3.0f;              /* 慢修 τ=3s（原10s，加速收敛） */
-    alpha_fast = SAMPLING_PERIOD_S / 0.1f;              /* 快修 τ=0.1s（温度突变） */
+    alpha_slow = SAMPLING_PERIOD_S / 3.0f; /* 慢修 τ=3s（原10s，加速收敛） */
+    alpha_fast = SAMPLING_PERIOD_S / 0.1f; /* 快修 τ=0.1s（温度突变） */
+    alpha_very_slow = SAMPLING_PERIOD_S / 30.0f; /* 极慢修 τ=30s（温度稳定） */
     ki_gain = KI_REF * REF_FREQ_HZ * SAMPLING_PERIOD_S; /* 积分速率守恒 */
     params_inited = 1;
   }
@@ -306,6 +308,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static int temp_stable_cnt = 0;               // 温度稳定计数器
   static float last_temp = 0;                   // 上次温度值
   static int temp_diff_flag = 0;                // 温度变化标志
+  static int stable_cnt_2 = 0;                  // 静止时段计数（区分 τ=1s/τ=3s 阶段）
   // ====== 阶段1：初始对准（约5秒，帧数由采样频率派生） ======
   if (first_run) {
     gx_sum += gx;
@@ -341,28 +344,34 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float gx_comp = gx - gx_bias;
   float gy_comp = gy - gy_bias;
   float gz_comp = gz - gyro_bias.gz_bias;
-  // ====== 阶段3：静止检测（原始值 + 温度自适应阈值） ======
-  // 阈值随温度缩放：|T - 25°C| 越大，温漂零偏可能越大，阈值相应放宽。
-  // 用原始值判静止需覆盖手册零偏包络 ZRO(T)=ZRO(25°C)+0.015*(T-25)，
-  // 保证静止设备不会因零偏随温度漂移而被误判为运动（避免零偏更新死锁）。
+  // ====== 阶段3：静止检测（修正值 + 温度自适应阈值） ======
+  // 用修正值(gz_comp)判静止：消除温漂偏置的方向不对称（原始值会被温漂
+  // "抵消/放大"，导致正负方向旋转判静止不对称）。零偏更新仍用原始值。
+  // 阈值覆盖"零偏残差+允许的低速旋转"，随温度自适应放大以覆盖温漂瞬态残差。
   float stable_thresh = STABLE_THRESH_BASE +
                         STABLE_THRESH_TEMP_COEFF * fabsf(temp - ZRO_TEMP_REF);
   if (stable_thresh > STABLE_THRESH_MAX) {
     stable_thresh = STABLE_THRESH_MAX;
   }
 
-  static uint16_t stable_cnt = 0;                    // 连续静止采样计数
-  float acc_norm_stable = sqrtf(ax * ax + ay * ay + az * az); // 加速度模长辅助判静止
-  uint8_t is_stable = (fabsf(gx) < stable_thresh) && // 三轴原始角速度均低于
-                      (fabsf(gy) < stable_thresh) && // 温度自适应阈值
-                      (fabsf(gz) < stable_thresh) &&
-                      (acc_norm_stable > 0.95f && acc_norm_stable < 1.05f); // 且加速度≈1g
+  static int32_t stable_cnt = 0; // 连续静止采样计数（必须带符号，否则 -- 下溢）
+  float acc_norm_stable =
+      sqrtf(ax * ax + ay * ay + az * az); // 加速度模长辅助判静止
+  uint8_t is_stable =
+      (fabsf(gx_comp) < stable_thresh) && // 三轴修正值（去零偏残差）均低于
+      (fabsf(gy_comp) < stable_thresh) && // 温度自适应阈值
+      (fabsf(gz_comp) < stable_thresh) &&
+      (acc_norm_stable > 0.95f && acc_norm_stable < 1.05f); // 且加速度≈1g
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
     stable_cnt++;
   } else {
-    stable_cnt = 0;
+    /* 滞回：每帧不稳减 50 帧（FRAMES_5S×0.01），1帧不稳≈50帧静止 */
+    stable_cnt -= (int32_t)(FRAMES_5S * 0.001f); // 1s减完
+    if (stable_cnt < 0) {
+      stable_cnt = 0;
+    }
     // 运动时衰减 Mahony 积分项，防止积分饱和（INTEGRAL_DECAY 预计算常量）
     ix *= INTEGRAL_DECAY;
     iy *= INTEGRAL_DECAY;
@@ -482,8 +491,13 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float vy = 2.0f * (q0 * q1 + q2 * q3);
   float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 
+  if (temp_diff_flag) {
+    att.roll = 123.0f; // 温度突变时 roll 输出异常值
+  } else {
+    att.roll = -atan2f(vy, vz) * 57.3f;
+  }
   att.pitch = -atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
-  att.roll = -atan2f(vy, vz) * 57.3f;
+  // att.roll = -atan2f(vy, vz) * 57.3f;
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
   temp_stable_cnt++;
@@ -496,25 +510,38 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
       temp_diff_flag = 0;
     }
   }
-
+  float alpha;
   // 零偏更新：仅当静止≥5秒（帧数派生）才执行
   if (stable_cnt > FRAMES_5S) {
+    stable_cnt = FRAMES_5S; // 防止计数器溢出
     // 温度突变→最快收敛(τ=0.1s)；刚静止的前5秒→快速重收敛(τ=1s)
     // 抵消晃动后残差；之后→慢速跟踪(τ=3s)
-    float alpha;
+    stable_cnt_2++;
     if (temp_diff_flag) {
-      alpha = alpha_fast;                    /* τ=0.1s */
-    } else if (stable_cnt < FRAMES_5S * 2) {
-      alpha = SAMPLING_PERIOD_S / 1.0f;      /* τ=1s 快速重收敛 */
+      alpha = alpha_fast; /* τ=0.1s */
+    } else if (stable_cnt_2 < FRAMES_5S) {
+      alpha = SAMPLING_PERIOD_S / 1.0f; /* τ=1s 快速重收敛 */
     } else {
-      alpha = alpha_slow;                    /* τ=3s */
+      alpha = alpha_slow; /* τ=3s */
     }
     gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
     gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
     gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
   } else {
+    stable_cnt_2 = 0;
+    if (!temp_diff_flag && is_stable) {
+      alpha = alpha_very_slow; /* τ=30s */
+      gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
+      gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
+      gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
+    } else if (is_stable) {
+      alpha = alpha_very_slow * 1.5; /* τ=30s */
+      gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
+      gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
+      gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
+    }
     // 温度突变时减慢航向积分，避免温漂突变导致航向跳动
-    float alpha_temp = temp_diff_flag && is_stable ? 0.1 : 1;
+    float alpha_temp = temp_diff_flag && is_stable ? 0.005 : 1;
     // 航向角纯陀螺积分（6轴模式无磁力计修正）
     att.yaw_now += gz_comp * DT * alpha_temp;
   }
@@ -1075,7 +1102,7 @@ int main(void) {
 
   static uint32_t rate_cnt = 0;
   while (1) {
-    
+
     if (imu_debug_flag) {
       imu_debug_flag = 0;
       // printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", icm_raw.temp, icm_raw.gx);
