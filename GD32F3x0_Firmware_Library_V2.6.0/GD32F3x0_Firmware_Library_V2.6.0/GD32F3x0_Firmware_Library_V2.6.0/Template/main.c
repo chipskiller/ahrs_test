@@ -1105,7 +1105,7 @@ int main(void) {
 
     if (imu_debug_flag) {
       imu_debug_flag = 0;
-      printf("temp=%.4f, yaw=%.4f\r\n", icm_raw.temp, att.yaw_now);
+      // printf("temp=%.4f, yaw=%.4f\r\n", icm_raw.temp, att.yaw_now);
       // printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", icm_raw.temp, icm_raw.gx);
       // printf("rate_cnt=%d\n", rate_cnt);
       rate_cnt = 0;
