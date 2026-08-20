@@ -291,12 +291,12 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   // ====== 阶段0：静态变量（跨调用保持状态） ======
   // 滤波参数由采样周期 SAMPLING_PERIOD_S 派生，首次调用计算一次
   static uint8_t params_inited = 0;
-  static float alpha_slow = 0.0f, alpha_fast = 0.0f, alpha_very_slow = 0.0f;
+  static float alpha_fast = 0.0f, alpha_very_fast = 0.0f, alpha_very_slow = 0.0f;
   static float ki_gain = 0.0f;
   if (!params_inited) {
-    alpha_slow = SAMPLING_PERIOD_S / 3.0f; /* 慢修 τ=3s（原10s，加速收敛） */
-    alpha_fast = SAMPLING_PERIOD_S / 0.1f; /* 快修 τ=0.1s（温度突变） */
-    alpha_very_slow = SAMPLING_PERIOD_S / 10.0f; /* 极慢修 τ=10s（温度稳定） */
+    alpha_fast = SAMPLING_PERIOD_S / 0.5f; /* 慢修 τ=0.5s（原10s，加速收敛） */
+    alpha_very_fast = SAMPLING_PERIOD_S / 0.1f; /* 快修 τ=0.1s（温度突变） */
+    alpha_very_slow = SAMPLING_PERIOD_S / 3.0f; /* 极慢修 τ=3s（温度稳定） */
     ki_gain = KI_REF * REF_FREQ_HZ * SAMPLING_PERIOD_S; /* 积分速率守恒 */
     params_inited = 1;
   }
@@ -501,8 +501,8 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
   temp_stable_cnt++;
-  if (temp_stable_cnt % (int)FRAMES_30S == 0) { // 每30s（帧数派生）检测温度变化
-    if (fabsf(temp - last_temp) >= 0.2f) {
+  if (temp_stable_cnt % (int)FRAMES_3S == 0) { // 每3s（帧数派生）检测温度变化
+    if (fabsf(temp - last_temp) >= 0.25f) {
       last_temp = temp;
       temp_stable_cnt = 0;
       temp_diff_flag = 1;
@@ -518,11 +518,11 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     // 抵消晃动后残差；之后→慢速跟踪(τ=3s)
     stable_cnt_2++;
     if (temp_diff_flag) {
-      alpha = alpha_fast; /* τ=0.1s */
+      alpha = alpha_very_fast; /* τ=0.1s */
     } else if (stable_cnt_2 < FRAMES_5S) {
       alpha = SAMPLING_PERIOD_S / 1.0f; /* τ=1s 快速重收敛 */
     } else {
-      alpha = alpha_slow; /* τ=3s */
+      alpha = alpha_fast; /* τ=0.5s */
     }
     gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
     gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
@@ -530,12 +530,12 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   } else {
     stable_cnt_2 = 0;
     if (!temp_diff_flag && is_stable) {
-      alpha = alpha_very_slow; /* τ=10s */
+      alpha = alpha_very_slow; /* τ=3s */
       gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
       gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
       gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
     } else if (is_stable) {
-      alpha = alpha_very_slow * 2; /* τ=5s */
+      alpha = alpha_very_slow * 2; /* τ=1.5s */
       gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
       gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
       gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
@@ -1105,6 +1105,7 @@ int main(void) {
 
     if (imu_debug_flag) {
       imu_debug_flag = 0;
+      printf("temp=%.4f, yaw=%.4f\r\n", icm_raw.temp, att.yaw_now);
       // printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", icm_raw.temp, icm_raw.gx);
       // printf("rate_cnt=%d\n", rate_cnt);
       rate_cnt = 0;

@@ -55,7 +55,7 @@ OF SUCH DAMAGE.
 #define FRAMES_PER_SEC  ((uint32_t)SAMPLING_FREQ_HZ)           /* 每秒帧数 */
 #define FRAMES_100MS    ((uint32_t)(0.1f * SAMPLING_FREQ_HZ))  /* 100ms 帧数 */
 #define FRAMES_5S       ((uint32_t)(5.0f * SAMPLING_FREQ_HZ))  /* 5s 帧数 */
-#define FRAMES_30S      ((uint32_t)(30.0f * SAMPLING_FREQ_HZ)) /* 30s 帧数 */
+#define FRAMES_3S       ((uint32_t)(3.0f * SAMPLING_FREQ_HZ)) /* 3s 帧数 */
 
 /* 滤波参数标定的参考基准（历史值在 100Hz 下标定，由采样频率折算） */
 #define REF_FREQ_HZ 100.0f  /* 参考频率(Hz) */
@@ -71,7 +71,7 @@ OF SUCH DAMAGE.
 
 /* ========== 固件版本号 ========== */
 /* 上位机通过对比版本号判断是否需要升级，版本相同则拒绝升级 */
-#define FW_VERSION "AHRS_V2.0.9.4_beta"
+#define FW_VERSION "AHRS_V2.0.9.5_beta"
 
 typedef struct {
   float w, x, y, z;
