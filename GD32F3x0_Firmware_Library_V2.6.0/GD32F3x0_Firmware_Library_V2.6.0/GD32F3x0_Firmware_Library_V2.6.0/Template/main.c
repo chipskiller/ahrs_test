@@ -54,9 +54,9 @@ int fputc(int ch, FILE *f) {
    - 方差是对"均值"的波动，与均值绝对值无关 → 免疫温漂方向不对称
    静止判定 = 三轴 σ < SIGMA_STABLE 且 均值残差 < 残差阈值 且 加速度≈1g
    零偏更新 = 向稳定窗口的统计均值 st_mean 收敛（比单帧更抗噪） */
-#define STAT_TAU_S 1.0f        /* 统计窗口时间常数(s)：EMA 有效记忆≈3τ */
+#define STAT_TAU_S 1.5f        /* 统计窗口时间常数(s)：EMA 有效记忆≈3τ */
 #define SIGMA_STABLE 0.20f     /* 静止标准差阈值(°/s)：静止时实测σ的3~5倍 */
-#define RESID_STABLE 0.50f     /* 均值残差基础阈值(°/s)：均值偏离零偏>此值视为旋转 */
+#define RESID_STABLE 0.70f     /* 均值残差基础阈值(°/s)：均值偏离零偏>此值视为旋转 */
 #define RESID_TEMP_COEFF 0.02f /* 残差阈值温度系数(°/s/°C)：温漂残差自适应放宽 */
 #define ZRO_TEMP_REF 25.0f     /* 手册零偏参考温度(°C)：温漂系数以25°C为基准 */
 
@@ -525,7 +525,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float vz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 
   if (temp_diff_flag) {
-    att.roll = 123.0f; // 温度突变时 roll 输出异常值
+    att.roll = temp; // 温度突变时 roll 输出异常值
   } else {
     att.roll = -atan2f(vy, vz) * 57.3f;
   }
@@ -535,7 +535,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   // ====== 阶段8：零偏在线校准与航向积分 ======
   temp_stable_cnt++;
   if (temp_stable_cnt % (int)FRAMES_3S == 0) { // 每3s（帧数派生）检测温度变化
-    if (fabsf(temp - last_temp) >= 0.25f) {
+    if (fabsf(temp - last_temp) >= 0.21f) {
       last_temp = temp;
       temp_stable_cnt = 0;
       temp_diff_flag = 1;
@@ -564,12 +564,12 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   } else {
     stable_cnt_2 = 0;
     if (!temp_diff_flag && is_stable) {
-      alpha = alpha_very_slow; /* τ=3s */
+      alpha = alpha_very_slow * 2; /* τ=1.5s */
       gx_bias          += alpha * (st_mean[0] - gx_bias);
       gy_bias          += alpha * (st_mean[1] - gy_bias);
       gyro_bias.gz_bias += alpha * (st_mean[2] - gyro_bias.gz_bias);
     } else if (is_stable) {
-      alpha = alpha_very_slow * 2; /* τ=1.5s */
+      alpha = alpha_very_slow * 3; /* τ=1.0s */
       gx_bias          += alpha * (st_mean[0] - gx_bias);
       gy_bias          += alpha * (st_mean[1] - gy_bias);
       gyro_bias.gz_bias += alpha * (st_mean[2] - gyro_bias.gz_bias);
