@@ -47,12 +47,18 @@ int fputc(int ch, FILE *f) {
 /* 采样周期/频率统一在 main.h 定义（SAMPLING_FREQ_HZ），DT 为其派生值 */
 #define MAG_DISTURB_THRESH 120.0f // 地磁突变判定阈值
 
-// 静止检测阈值（修正值判断：残差阈值，随温度自适应缩放）
-#define STABLE_THRESH_BASE                                                     \
-  0.7f // 基础阈值(°/s)：覆盖零偏残差（用修正值判静止，可更灵敏）
-#define STABLE_THRESH_TEMP_COEFF 0.02f // 温度系数(°/s/°C)：手册0.015，留余量
-#define STABLE_THRESH_MAX 5.0f         // 阈值上限(°/s)，防极端温度下阈值过大
-#define ZRO_TEMP_REF 25.0f // 手册零偏参考温度(°C)：温漂系数以25°C为基准
+/* ========== 统计稳定性估计参数（概率统计判静止 + 零偏估计） ==========
+   原理：对陀螺原始值做 EMA 均值/方差流式统计（每帧更新）：
+   - 均值 st_mean：反映当前零偏（滑动平均）
+   - 方差 st_var ：反映波动，方差小=静止，大=运动
+   - 方差是对"均值"的波动，与均值绝对值无关 → 免疫温漂方向不对称
+   静止判定 = 三轴 σ < SIGMA_STABLE 且 均值残差 < 残差阈值 且 加速度≈1g
+   零偏更新 = 向稳定窗口的统计均值 st_mean 收敛（比单帧更抗噪） */
+#define STAT_TAU_S 1.0f        /* 统计窗口时间常数(s)：EMA 有效记忆≈3τ */
+#define SIGMA_STABLE 0.20f     /* 静止标准差阈值(°/s)：静止时实测σ的3~5倍 */
+#define RESID_STABLE 0.50f     /* 均值残差基础阈值(°/s)：均值偏离零偏>此值视为旋转 */
+#define RESID_TEMP_COEFF 0.02f /* 残差阈值温度系数(°/s/°C)：温漂残差自适应放宽 */
+#define ZRO_TEMP_REF 25.0f     /* 手册零偏参考温度(°C)：温漂系数以25°C为基准 */
 
 /************************ 全局数据结构体 ************************/
 
@@ -294,9 +300,9 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static float alpha_fast = 0.0f, alpha_very_fast = 0.0f, alpha_very_slow = 0.0f;
   static float ki_gain = 0.0f;
   if (!params_inited) {
-    alpha_fast = SAMPLING_PERIOD_S / 0.5f; /* 慢修 τ=0.5s（原10s，加速收敛） */
-    alpha_very_fast = SAMPLING_PERIOD_S / 0.1f; /* 快修 τ=0.1s（温度突变） */
-    alpha_very_slow = SAMPLING_PERIOD_S / 3.0f; /* 极慢修 τ=3s（温度稳定） */
+    alpha_fast = SAMPLING_PERIOD_S / 0.5f; /* τ=0.5s 中速（静止稳态收敛） */
+    alpha_very_fast = SAMPLING_PERIOD_S / 0.1f; /* τ=0.1s 最快（温度突变快修） */
+    alpha_very_slow = SAMPLING_PERIOD_S / 3.0f; /* τ=3s 最慢（静止<5s 极慢跟踪） */
     ki_gain = KI_REF * REF_FREQ_HZ * SAMPLING_PERIOD_S; /* 积分速率守恒 */
     params_inited = 1;
   }
@@ -308,7 +314,10 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   static int temp_stable_cnt = 0;               // 温度稳定计数器
   static float last_temp = 0;                   // 上次温度值
   static int temp_diff_flag = 0;                // 温度变化标志
-  static int stable_cnt_2 = 0;                  // 静止时段计数（区分 τ=1s/τ=3s 阶段）
+  static int stable_cnt_2 = 0;                  // 静止时段计数（区分 τ=1s/τ=0.5s 阶段）
+  static float st_mean[3] = {0.0f, 0.0f, 0.0f}; // 陀螺原始值 EMA 均值（统计零偏估计，每帧更新）
+  static float st_var[3] = {0.0f, 0.0f, 0.0f};  // 陀螺原始值 EMA 方差（统计波动，每帧更新）
+  static uint8_t stat_inited = 0;               // 统计初始化标志（首次用当前值作均值起点）
   // ====== 阶段1：初始对准（约5秒，帧数由采样频率派生） ======
   if (first_run) {
     gx_sum += gx;
@@ -344,31 +353,55 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   float gx_comp = gx - gx_bias;
   float gy_comp = gy - gy_bias;
   float gz_comp = gz - gyro_bias.gz_bias;
-  // ====== 阶段3：静止检测（修正值 + 温度自适应阈值） ======
-  // 用修正值(gz_comp)判静止：消除温漂偏置的方向不对称（原始值会被温漂
-  // "抵消/放大"，导致正负方向旋转判静止不对称）。零偏更新仍用原始值。
-  // 阈值覆盖"零偏残差+允许的低速旋转"，随温度自适应放大以覆盖温漂瞬态残差。
-  float stable_thresh = STABLE_THRESH_BASE +
-                        STABLE_THRESH_TEMP_COEFF * fabsf(temp - ZRO_TEMP_REF);
-  if (stable_thresh > STABLE_THRESH_MAX) {
-    stable_thresh = STABLE_THRESH_MAX;
+
+  // ====== 阶段2.5：统计稳定性估计（EMA 均值 + EMA 方差） ======
+  // 对陀螺原始值做流式统计（每帧更新，不是固定值）：
+  //   - st_mean 向新样本靠拢 α（滑动平均，跟踪当前零偏）
+  //   - st_var  向偏差平方靠拢 α（滑动方差，反映波动）
+  // 增量式 EMA 含"泄放项"，数学上有界、收敛，不会越加越大。
+  // 首次调用用当前值作均值起点，避免从 0 缓慢爬升。
+  {
+    float g_raw[3] = {gx, gy, gz};
+    if (!stat_inited) {
+      st_mean[0] = gx; st_mean[1] = gy; st_mean[2] = gz;
+      stat_inited = 1;
+    }
+    float sa = SAMPLING_PERIOD_S / STAT_TAU_S; /* α = DT/τ */
+    for (int i = 0; i < 3; i++) {
+      float d = g_raw[i] - st_mean[i];
+      st_mean[i] += sa * d;                    /* 均值：向样本靠拢 α */
+      st_var[i]  += sa * (d * d - st_var[i]);  /* 方差：向 d² 靠拢 α（有界） */
+    }
   }
 
+  // ====== 阶段3：静止判定（统计稳定 + 均值残差 + 加速度辅助） ======
+  // 1) 统计稳定：三轴标准差 σ < SIGMA_STABLE（波动小 → 静止）
+  // 2) 均值残差：统计均值与当前零偏差 < 残差阈值（防匀速旋转被当静止；
+  //    残差阈值随温度自适应放大，防温漂残差卡死零偏更新）
+  // 3) 加速度模长 ≈1g（排除线性加速度/振动）
   static int32_t stable_cnt = 0; // 连续静止采样计数（必须带符号，否则 -- 下溢）
   float acc_norm_stable =
       sqrtf(ax * ax + ay * ay + az * az); // 加速度模长辅助判静止
-  uint8_t is_stable =
-      (fabsf(gx_comp) < stable_thresh) && // 三轴修正值（去零偏残差）均低于
-      (fabsf(gy_comp) < stable_thresh) && // 温度自适应阈值
-      (fabsf(gz_comp) < stable_thresh) &&
-      (acc_norm_stable > 0.95f && acc_norm_stable < 1.05f); // 且加速度≈1g
+  float resid_thresh = RESID_STABLE +
+                       RESID_TEMP_COEFF * fabsf(temp - ZRO_TEMP_REF);
+  uint8_t is_stat_stable =
+      (st_var[0] < SIGMA_STABLE * SIGMA_STABLE) &&
+      (st_var[1] < SIGMA_STABLE * SIGMA_STABLE) &&
+      (st_var[2] < SIGMA_STABLE * SIGMA_STABLE);
+  uint8_t is_bias_aligned =
+      (fabsf(st_mean[0] - gx_bias) < resid_thresh) &&
+      (fabsf(st_mean[1] - gy_bias) < resid_thresh) &&
+      (fabsf(st_mean[2] - gyro_bias.gz_bias) < resid_thresh);
+  uint8_t is_stable = is_stat_stable && is_bias_aligned &&
+                      (acc_norm_stable > 0.95f && acc_norm_stable < 1.05f);
   // printf("stable_cnt=%d, is_stable=%d, gx_comp=%.2f, gy_comp=%.2f,
   // gz_comp=%.2f\r\n", stable_cnt, is_stable, gx_comp, gy_comp, gz_comp);
   if (is_stable) {
     stable_cnt++;
   } else {
-    /* 滞回：每帧不稳减 50 帧（FRAMES_5S×0.01），1帧不稳≈50帧静止 */
-    stable_cnt -= (int32_t)(FRAMES_5S * 0.001f); // 1s减完
+    /* 滞回：每帧不稳减 5 帧（FRAMES_5S×0.001），1帧不稳≈5帧静止；
+       5000 帧累计约需 1s 连续不稳才清零，容忍偶发抖动 */
+    stable_cnt -= (int32_t)(FRAMES_5S * 0.001f);
     if (stable_cnt < 0) {
       stable_cnt = 0;
     }
@@ -480,7 +513,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 
   quat_normalize();
 
-  // ====== 阶段8：四元数 → 欧拉角输出 ======
+  // ====== 阶段7：四元数 → 欧拉角输出 ======
   q0 = quat.w;
   q1 = quat.x;
   q2 = quat.y;
@@ -499,7 +532,7 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
   att.pitch = -atan2f(-vx, sqrtf(vy * vy + vz * vz)) * 57.3f;
   // att.roll = -atan2f(vy, vz) * 57.3f;
 
-  // ====== 阶段7：长时间静止时在线校准陀螺零偏 ======
+  // ====== 阶段8：零偏在线校准与航向积分 ======
   temp_stable_cnt++;
   if (temp_stable_cnt % (int)FRAMES_3S == 0) { // 每3s（帧数派生）检测温度变化
     if (fabsf(temp - last_temp) >= 0.25f) {
@@ -511,11 +544,12 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     }
   }
   float alpha;
-  // 零偏更新：仅当静止≥5秒（帧数派生）才执行
+  // 零偏更新：仅当静止≥5秒（帧数派生）才执行。
+  // 收敛目标改为统计均值 st_mean（稳定窗口的均值，比单帧 gx/gy/gz 更抗噪）。
   if (stable_cnt > FRAMES_5S) {
     stable_cnt = FRAMES_5S; // 防止计数器溢出
     // 温度突变→最快收敛(τ=0.1s)；刚静止的前5秒→快速重收敛(τ=1s)
-    // 抵消晃动后残差；之后→慢速跟踪(τ=3s)
+    // 抵消晃动后残差；之后→中速跟踪(τ=0.5s)
     stable_cnt_2++;
     if (temp_diff_flag) {
       alpha = alpha_very_fast; /* τ=0.1s */
@@ -524,21 +558,21 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
     } else {
       alpha = alpha_fast; /* τ=0.5s */
     }
-    gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
-    gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
-    gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
+    gx_bias          += alpha * (st_mean[0] - gx_bias);
+    gy_bias          += alpha * (st_mean[1] - gy_bias);
+    gyro_bias.gz_bias += alpha * (st_mean[2] - gyro_bias.gz_bias);
   } else {
     stable_cnt_2 = 0;
     if (!temp_diff_flag && is_stable) {
       alpha = alpha_very_slow; /* τ=3s */
-      gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
-      gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
-      gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
+      gx_bias          += alpha * (st_mean[0] - gx_bias);
+      gy_bias          += alpha * (st_mean[1] - gy_bias);
+      gyro_bias.gz_bias += alpha * (st_mean[2] - gyro_bias.gz_bias);
     } else if (is_stable) {
       alpha = alpha_very_slow * 2; /* τ=1.5s */
-      gx_bias = gx_bias * (1.0f - alpha) + gx * alpha;
-      gy_bias = gy_bias * (1.0f - alpha) + gy * alpha;
-      gyro_bias.gz_bias = gyro_bias.gz_bias * (1.0f - alpha) + gz * alpha;
+      gx_bias          += alpha * (st_mean[0] - gx_bias);
+      gy_bias          += alpha * (st_mean[1] - gy_bias);
+      gyro_bias.gz_bias += alpha * (st_mean[2] - gyro_bias.gz_bias);
     }
     // 温度突变时减慢航向积分，避免温漂突变导致航向跳动
     float alpha_temp = temp_diff_flag ? 0.005 : 1;
@@ -1105,7 +1139,7 @@ int main(void) {
 
     if (imu_debug_flag) {
       imu_debug_flag = 0;
-      // printf("temp=%.4f, yaw=%.4f\r\n", icm_raw.temp, att.yaw_now);
+      // printf("temp=%.4f, yaw=%.4f, roll=%.4f\r\n", icm_raw.temp, att.yaw_now, att.roll);
       // printf("55 00 EE T=%.3f  gz_raw=%.3f\r\n", icm_raw.temp, icm_raw.gx);
       // printf("rate_cnt=%d\n", rate_cnt);
       rate_cnt = 0;
