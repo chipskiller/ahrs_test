@@ -226,9 +226,9 @@ void qmc5883p_get_raw_data(void) {
   i2c_reg_read_multi(I2C_MAG, QMC5883P_ADDR, 0x01, buf, 6);
 
   /* QMC5883P 小端序: X_L, X_H, Y_L, Y_H, Z_L, Z_H */
-  int16_t mx_raw = (buf[1] << 8) | buf[0];
-  int16_t my_raw = (buf[3] << 8) | buf[2];
-  int16_t mz_raw = (buf[5] << 8) | buf[4];
+  int16_t my_raw = (buf[1] << 8) | buf[0];
+  int16_t mz_raw = (buf[3] << 8) | buf[2];
+  int16_t mx_raw = (buf[5] << 8) | buf[4];
 
   mag_raw.mx = mx_raw / 2048.0f; /* 转换为高斯 */
   mag_raw.my = my_raw / 2048.0f;
