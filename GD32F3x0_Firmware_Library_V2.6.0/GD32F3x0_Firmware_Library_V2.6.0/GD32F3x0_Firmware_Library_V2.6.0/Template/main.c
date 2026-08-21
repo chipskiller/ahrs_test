@@ -592,35 +592,52 @@ void attitude_calc_6axis(float ax, float ay, float az, float gx, float gy,
 }
 
 /**
- * @brief 夜间9轴融合解算（无大车干扰，地磁缓慢修正Yaw积分漂移）
+ * @brief 9轴姿态融合解算（夜间模式，地磁修正Yaw角漂移）
+ * @note  调用6轴解算获取基础姿态，再通过磁力计数据对航向角(Yaw)进行缓慢修正
+ *        仅在夜间模式且无外部磁场干扰时执行地磁修正，避免大车/电机等干扰源影响
+ *        当俯仰角绝对值过大（cos_p < 0.15，约81°）时跳过修正，避免万向锁奇异性
+ * @param 无
+ * @retval 无（结果更新至全局 att 结构体）
  */
 void attitude_calc_9axis(void) {
+  /* Step 1: 6轴基础解算（加速度计+陀螺仪），输入已做坐标系对齐与符号调整 */
   attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
                       icm_raw.gy, icm_raw.gx, icm_raw.temp);
 
-  // 磁力计修正：仅在夜间模式、静止且无地磁干扰时执行
+  /* Step 2: 磁力计地磁修正 —— 仅在夜间模式(day_mode==0)且无磁场干扰时执行 */
   if (day_mode == 0 && mag_disturb_flag == 0) {
-    float pitch_rad = att.pitch * 0.0174533f;
+    /* 俯仰角转弧度，预计算cos_p用于后续水平面投影及姿态奇异性判断 */
+    float pitch_rad = att.pitch * 0.0174533f; /* 度 → 弧度，系数 π/180 */
     float cos_p = cosf(pitch_rad);
 
+    /* 俯仰角接近±90°时，水平面投影失效，跳过地磁修正（避免万向锁） */
     if (fabsf(cos_p) > 0.15f) {
+      /* 横滚角转弧度，预计算三角函数值 */
       float roll_rad = att.roll * 0.0174533f;
       float sin_p = sinf(pitch_rad);
       float cos_r = cosf(roll_rad);
       float sin_r = sinf(roll_rad);
 
+      /*
+       * 将磁传感器读数从机体坐标系投影到水平面（导航坐标系东北天中的水平分量）
+       * 公式推导：利用俯仰角和横滚角做旋转补偿，提取水平面内的 mx_h（北向分量）和 my_h（东向分量）
+       */
       float mx_h = mag_raw.mx * cos_p + mag_raw.mz * sin_p;
       float my_h = mag_raw.mx * sin_r * sin_p + mag_raw.my * cos_r -
                    mag_raw.mz * sin_r * cos_p;
 
-      float mag_yaw = atan2f(my_h, mx_h) * 57.3f;
+      /* 由水平面磁分量计算磁航向角，atan2f(y, x) 结果范围 (-π, π]，再转回度数 */
+      float mag_yaw = atan2f(my_h, mx_h) * 57.3f; /* 弧度 → 度，系数 180/π */
+
+      /* 计算磁航向与当前Yaw的误差，并归一化到 [-180°, 180°] 区间 */
       float yaw_err = mag_yaw - att.yaw_now;
       if (yaw_err > 180.0f)
         yaw_err -= 360.0f;
-      if (yaw_err < -180.0f)
+      else if (yaw_err < -180.0f)
         yaw_err += 360.0f;
 
-      att.yaw_now += yaw_err * 0.01f;
+      /* 缓慢修正：以1%的误差增益逐步收敛，抑制磁噪声并避免突变 */
+      att.yaw_now += yaw_err * 0.1f;
     }
   }
 }
@@ -693,7 +710,7 @@ void imu_main_loop(uint8_t rtc_hour) {
   attitude_calc_6axis(-icm_raw.az, icm_raw.ay, icm_raw.ax, -icm_raw.gz,
                       icm_raw.gy, icm_raw.gx, icm_raw.temp);
   //   else
-  //   attitude_calc_9axis();
+    // attitude_calc_9axis();
 
   // 计算当前角度相对安装零点的偏移量
   float yaw_offset = fabsf(att.yaw_now - att.yaw_base);
@@ -1162,7 +1179,7 @@ int main(void) {
       // printf("imu_tmp = %.4f\r\n", icm_raw.temp);
       // printf("mag_norm=%.4f,mag_x=%.4f,mag_y=%.4f,mag_z=%.4f\n",
       //        mag_raw.mag_norm, mag_raw.mx, mag_raw.my, mag_raw.mz);
-      // printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
+      printf("P=%.4f,R=%.4f,Y=%.4f\r\n", att.pitch, att.roll, att.yaw_now);
       // printf("ax=%.4f,ay=%.4f,az=%.4f\r\ngx=%.4f,gy=%.4f,gz=%.4f\r\n",
       //        icm_raw.ax, icm_raw.ay, icm_raw.az, icm_raw.gx, icm_raw.gy,
       //        icm_raw.gz);
